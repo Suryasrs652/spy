@@ -20,6 +20,7 @@ class AuditOut(BaseModel):
     max_urls: int
     spy_score: float | None = None
     technical_score: float | None = None
+    seo_score: float | None = None
     content_score: float | None = None
     performance_score: float | None = None
     authority_score: float | None = None
@@ -27,6 +28,7 @@ class AuditOut(BaseModel):
     geo_score: float | None = None
     confidence: float | None = None
     score_version: str
+    evidence: dict = {}
     failure_category: str | None = None
     failure_code: str | None = None
     failure_message: str | None = None
@@ -76,6 +78,26 @@ class AuditPageOut(BaseModel):
     word_count: int | None
     crawl_depth: int
     internal_pagerank: float | None = None
+
+    # §144 Site Explorer (technical inventory)
+    response_ms: int | None = None
+    redirect_count: int = 0
+    robots_allowed: bool = True
+    from_sitemap: bool = False
+
+    # §144 Content Explorer (content-quality signals)
+    h1_count: int = 0
+    h2_count: int = 0
+    h3_count: int = 0
+    heading_order_valid: bool = True
+    has_schema: bool = False
+    schema_types: list[str] = []
+    question_heading_count: int = 0
+    list_count: int = 0
+    table_count: int = 0
+    has_definition_list: bool = False
+    has_author_byline: bool = False
+    images_missing_alt: int = 0
 
 
 class RecommendationOut(BaseModel):
