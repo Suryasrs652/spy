@@ -26,6 +26,9 @@ htmlcov/
 # docker/volumes
 infra/docker/.data/
 
+# local backups (scripts/backup.sh) — real user data, never committed
+/backups/
+
 # editors/os
 .vscode/
 .idea/
