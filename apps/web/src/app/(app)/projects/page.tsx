@@ -13,7 +13,7 @@ export default async function ProjectsPage() {
       </div>
 
       {!projects ? (
-        <div className="card p-6 mt-6 text-muted text-sm">Couldn't load projects right now.</div>
+        <div className="card p-6 mt-6 text-muted text-sm">Couldn&apos;t load projects right now.</div>
       ) : projects.length === 0 ? (
         <div className="card p-8 mt-6 text-center">
           <p className="text-muted">No projects yet.</p>

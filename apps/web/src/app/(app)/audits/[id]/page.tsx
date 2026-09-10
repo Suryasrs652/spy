@@ -63,6 +63,9 @@ export default function AuditResultsPage({ params }: { params: Promise<{ id: str
   }, [id]);
 
   useEffect(() => {
+    // refresh() only sets state after its own awaits resolve (a plain
+    // fetch-on-mount), not synchronously within this effect body.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     refresh();
     const interval = setInterval(() => {
       setAudit((current) => {

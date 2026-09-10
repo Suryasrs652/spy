@@ -37,7 +37,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
 
       <h2 className="text-lg font-semibold mt-10 mb-4">Audit History</h2>
       {!audits ? (
-        <div className="card p-6 text-muted text-sm">Couldn't load audits.</div>
+        <div className="card p-6 text-muted text-sm">Couldn&apos;t load audits.</div>
       ) : audits.length === 0 ? (
         <div className="card p-8 text-center text-muted">No audits yet — run your first one above.</div>
       ) : (

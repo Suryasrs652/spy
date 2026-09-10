@@ -119,9 +119,9 @@ jobs:
         working-directory: apps/web
         run: npm run typecheck
 
-      # `npm run lint` is skipped: ESLint 9 needs a flat eslint.config.js
-      # apps/web doesn't have yet (tracked separately) — add this step
-      # back once that's fixed.
+      - name: Lint (eslint)
+        working-directory: apps/web
+        run: npm run lint
 
       - name: Build (production)
         working-directory: apps/web

@@ -42,7 +42,7 @@ export default function TermsPage() {
 
         <h2 className="text-white font-semibold">Limitation of liability</h2>
         <p>
-          Spy is provided "as is" without warranty of any kind. We are not liable for indirect or
+          Spy is provided &quot;as is&quot; without warranty of any kind. We are not liable for indirect or
           consequential damages arising from use of the service.
         </p>
 

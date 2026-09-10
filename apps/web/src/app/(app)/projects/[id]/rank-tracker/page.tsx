@@ -25,6 +25,9 @@ export default function RankTrackerPage({ params }: { params: Promise<{ id: stri
   }
 
   useEffect(() => {
+    // load() only sets state after its own await resolves (a plain
+    // fetch-on-mount), not synchronously within this effect body.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);

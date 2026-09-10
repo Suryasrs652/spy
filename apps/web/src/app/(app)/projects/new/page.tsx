@@ -49,7 +49,7 @@ export default function NewProjectPage() {
           id="url" type="url" required placeholder="https://example.com" className="input mb-2"
           value={url} onChange={(e) => setUrl(e.target.value)}
         />
-        <p className="text-xs text-muted mb-6">Any URL on the site — we'll audit the whole domain.</p>
+        <p className="text-xs text-muted mb-6">Any URL on the site — we&apos;ll audit the whole domain.</p>
 
         <button type="submit" disabled={loading} className="btn-primary w-full">
           {loading ? "Adding…" : "Add Project"}

@@ -8,15 +8,11 @@ import { publicAuthPost, ApiError } from "@/lib/api";
 function VerifyEmailContent() {
   const params = useSearchParams();
   const token = params.get("token");
-  const [status, setStatus] = useState<"loading" | "success" | "error">("loading");
-  const [message, setMessage] = useState("");
+  const [status, setStatus] = useState<"loading" | "success" | "error">(token ? "loading" : "error");
+  const [message, setMessage] = useState(token ? "" : "Missing verification token.");
 
   useEffect(() => {
-    if (!token) {
-      setStatus("error");
-      setMessage("Missing verification token.");
-      return;
-    }
+    if (!token) return;
     publicAuthPost("verify-email", { token })
       .then(() => setStatus("success"))
       .catch((err) => {

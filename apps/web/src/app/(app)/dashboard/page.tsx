@@ -13,7 +13,7 @@ export default async function DashboardPage() {
   return (
     <div className="p-8 max-w-5xl">
       <h1 className="text-2xl font-semibold">Overview</h1>
-      <p className="text-muted mt-1">What happened, what's wrong, and what to do next.</p>
+      <p className="text-muted mt-1">What happened, what&apos;s wrong, and what to do next.</p>
 
       <div className="mt-8 card p-6">
         {entitlement?.can_run ? (
@@ -53,7 +53,7 @@ export default async function DashboardPage() {
 
       <h2 className="text-lg font-semibold mt-10 mb-4">Your Projects</h2>
       {!projects ? (
-        <div className="card p-6 text-muted text-sm">Couldn't load projects right now.</div>
+        <div className="card p-6 text-muted text-sm">Couldn&apos;t load projects right now.</div>
       ) : projects.length === 0 ? (
         <div className="card p-8 text-center">
           <p className="text-muted">No projects yet — add your first website to get started.</p>
