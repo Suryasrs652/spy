@@ -1,0 +1,92 @@
+from __future__ import annotations
+
+import uuid
+from datetime import datetime
+
+from pydantic import BaseModel, ConfigDict
+
+
+class AuditCreateRequest(BaseModel):
+    project_id: uuid.UUID
+    max_urls: int | None = None
+
+
+class AuditOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    project_id: uuid.UUID
+    status: str
+    max_urls: int
+    spy_score: float | None = None
+    technical_score: float | None = None
+    content_score: float | None = None
+    performance_score: float | None = None
+    authority_score: float | None = None
+    aeo_score: float | None = None
+    geo_score: float | None = None
+    confidence: float | None = None
+    score_version: str
+    failure_category: str | None = None
+    failure_code: str | None = None
+    failure_message: str | None = None
+    started_at: datetime | None = None
+    completed_at: datetime | None = None
+    created_at: datetime
+
+
+class AuditProgressOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    status: str
+    progress: int
+    urls_discovered: int
+    urls_processed: int
+    heartbeat_at: datetime | None = None
+    error_code: str | None = None
+    error_detail: str | None = None
+
+
+class AuditIssueOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    rule_id: str
+    category: str
+    severity: str
+    title: str
+    description: str
+    recommendation: str
+    affected_count: int
+    score_impact: float
+
+
+class AuditPageOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    url: str
+    normalized_url: str
+    status_code: int | None
+    title: str | None
+    meta_description: str | None
+    h1: str | None
+    canonical_url: str | None
+    indexable: bool
+    word_count: int | None
+    crawl_depth: int
+
+
+class RecommendationOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: uuid.UUID
+    category: str
+    title: str
+    description: str
+    impact: int
+    confidence: int
+    effort: int
+    priority_score: float
+    status: str
+    group: str
