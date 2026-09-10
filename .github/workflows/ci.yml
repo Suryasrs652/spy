@@ -1,0 +1,135 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: spy
+          POSTGRES_PASSWORD: spy
+          POSTGRES_DB: spy
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U spy -d spy"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s --health-timeout 5s --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start MinIO
+        # GitHub Actions' `services:` block has no way to override a
+        # container's command/args, but minio/minio's image needs
+        # `server /data` passed explicitly (its bare default CMD just
+        # prints --help and exits) — so it's started as a plain background
+        # container instead of a declared service.
+        run: |
+          docker run -d --name minio \
+            -p 9000:9000 \
+            -e MINIO_ROOT_USER=spyminio \
+            -e MINIO_ROOT_PASSWORD=spyminio123 \
+            minio/minio:latest server /data
+          for i in $(seq 1 20); do
+            curl -sf http://localhost:9000/minio/health/live && break
+            sleep 2
+          done
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: services/api/requirements.txt
+
+      - name: Install Python dependencies
+        working-directory: services/api
+        run: pip install -r requirements.txt
+
+      - name: Install Playwright's Chromium
+        working-directory: services/api
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run migrations
+        working-directory: services/api
+        run: alembic upgrade head
+        env:
+          DATABASE_URL_SYNC: postgresql+psycopg://spy:spy@localhost:5432/spy
+
+      - name: Lint (ruff)
+        working-directory: services/api
+        run: ruff check .
+
+      - name: Type-check (mypy)
+        working-directory: services/api
+        run: mypy app
+        # Pre-existing, tracked findings across the rule-engine/scoring
+        # modules (mostly Optional-narrowing mypy can't see through) —
+        # not a CI gate yet. Remove once those are cleaned up.
+        continue-on-error: true
+
+      - name: Test (pytest)
+        working-directory: services/api
+        run: pytest -q
+        env:
+          DATABASE_URL: postgresql+asyncpg://spy:spy@localhost:5432/spy
+          DATABASE_URL_SYNC: postgresql+psycopg://spy:spy@localhost:5432/spy
+          REDIS_URL: redis://localhost:6379/0
+          CELERY_BROKER_URL: redis://localhost:6379/1
+          CELERY_RESULT_BACKEND: redis://localhost:6379/2
+          STORAGE_ENDPOINT: http://localhost:9000
+          STORAGE_PUBLIC_ENDPOINT: http://localhost:9000
+
+      - name: Dependency audit (pip-audit)
+        working-directory: services/api
+        run: |
+          pip install -q pip-audit
+          pip-audit -r requirements.txt
+        # Informational for now — a finding here should be triaged (see
+        # requirements.txt's own comments for the one accepted exception),
+        # not silently ignored, but shouldn't yet block every PR.
+        continue-on-error: true
+
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+
+      - name: Install dependencies
+        working-directory: apps/web
+        run: npm ci
+
+      - name: Type-check
+        working-directory: apps/web
+        run: npm run typecheck
+
+      # `npm run lint` is skipped: ESLint 9 needs a flat eslint.config.js
+      # apps/web doesn't have yet (tracked separately) — add this step
+      # back once that's fixed.
+
+      - name: Build (production)
+        working-directory: apps/web
+        run: npm run build
+        env:
+          NODE_ENV: production
+
+      - name: Dependency audit (npm audit)
+        working-directory: apps/web
+        run: npm audit --omit=dev
+        continue-on-error: true
