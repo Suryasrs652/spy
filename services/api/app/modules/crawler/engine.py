@@ -319,6 +319,11 @@ async def _fetch_and_parse(fetcher, url, depth, origin, policy, user_agent):
     page.hreflang_tags = [{"lang": t.lang, "url": t.url} for t in parsed.hreflang_tags]
     page.has_insecure_form_action = parsed.has_insecure_form_action
     page.word_frequency_top_ratio = parsed.word_frequency_top_ratio
+    page.question_heading_count = parsed.question_heading_count
+    page.list_count = parsed.list_count
+    page.table_count = parsed.table_count
+    page.has_definition_list = parsed.has_definition_list
+    page.has_author_byline = parsed.has_author_byline
 
     robots_meta_lower = (parsed.robots_meta or "").lower()
     x_robots_lower = (page.x_robots_tag or "").lower()

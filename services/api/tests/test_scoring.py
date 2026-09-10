@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import uuid
 
-from app.modules.crawler.models import CrawlPage
+from app.modules.crawler.models import CrawlPage, PageLink
 from app.modules.scoring.spy_score import compute_spy_score
 from app.modules.seo.rules import run_all_rules
 
@@ -41,8 +41,14 @@ def _page(**kwargs) -> CrawlPage:
             "content-security-policy": "default-src 'self'", "x-frame-options": "DENY",
             "referrer-policy": "strict-origin-when-cross-origin", "permissions-policy": "geolocation=()",
         },
-        schema_blocks=[{"@type": "Organization", "name": "Example Co", "url": "https://example.com"}],
+        schema_blocks=[{
+            "@type": "Organization", "name": "Example Co", "url": "https://example.com",
+            "logo": "https://example.com/logo.png", "sameAs": ["https://twitter.com/example"],
+        }],
         is_redirect_loop=False,
+        # Full §48/§49 AEO/GEO signals — defaulted to a "clean" page's values.
+        question_heading_count=1, list_count=1, table_count=0, has_definition_list=False,
+        has_author_byline=True,
     )
     defaults.update(kwargs)
     return CrawlPage(**defaults)
@@ -59,6 +65,17 @@ def _clean_site(n: int = 5) -> list[CrawlPage]:
             crawl_depth=0 if i == 0 else 1,
         )
         for i in range(n)
+    ]
+
+
+def _citation_links(pages: list[CrawlPage]) -> list[PageLink]:
+    """One outbound external link per page — the §49 citation-readiness signal."""
+    return [
+        PageLink(
+            id=uuid.uuid4(), audit_id=p.audit_id, source_page_id=p.id,
+            target_url="https://external-source.example/article", is_internal=False,
+        )
+        for p in pages
     ]
 
 
@@ -81,14 +98,17 @@ def _broken_site(n: int = 5) -> list[CrawlPage]:
 def test_perfect_site_scores_high() -> None:
     pages = _clean_site()
     findings = run_all_rules(pages, [])
-    score = compute_spy_score(pages=pages, findings=findings, urls_processed=len(pages))
+    score = compute_spy_score(pages=pages, findings=findings, urls_processed=len(pages), links=_citation_links(pages))
     assert score.spy_score >= 90, f"expected a clean, schema-complete site to score highly, got {score.spy_score}"
     assert score.authority_score is None, "authority has no M1 data source and must not be guessed"
 
 
 def test_broken_site_scores_much_lower_than_clean_site() -> None:
-    clean_findings = run_all_rules(_clean_site(), [])
-    clean_score = compute_spy_score(pages=_clean_site(), findings=clean_findings, urls_processed=5)
+    clean_pages = _clean_site()
+    clean_findings = run_all_rules(clean_pages, [])
+    clean_score = compute_spy_score(
+        pages=clean_pages, findings=clean_findings, urls_processed=5, links=_citation_links(clean_pages)
+    )
 
     broken_pages = _broken_site()
     broken_findings = run_all_rules(broken_pages, [])
@@ -104,8 +124,8 @@ def test_score_is_reproducible_for_identical_evidence() -> None:
     pages = _clean_site()
     findings1 = run_all_rules(pages, [])
     findings2 = run_all_rules(pages, [])
-    score1 = compute_spy_score(pages=pages, findings=findings1, urls_processed=len(pages))
-    score2 = compute_spy_score(pages=pages, findings=findings2, urls_processed=len(pages))
+    score1 = compute_spy_score(pages=pages, findings=findings1, urls_processed=len(pages), links=_citation_links(pages))
+    score2 = compute_spy_score(pages=pages, findings=findings2, urls_processed=len(pages), links=_citation_links(pages))
     assert score1.spy_score == score2.spy_score
     assert score1.evidence == score2.evidence
 
@@ -126,3 +146,87 @@ def test_confidence_scales_with_crawl_coverage() -> None:
     high = compute_spy_score(pages=pages, findings=findings, urls_processed=20, target_sample_size=20)
     assert low.confidence < high.confidence
     assert high.confidence == 100.0
+
+
+def test_aeo_score_rewards_question_headings_structured_content_and_bylines() -> None:
+    """§48 full AEO: question coverage, structured content and bylines are
+    real signals extracted by the crawler (parser.py), not guessed — a page
+    with none of them must score lower than one with all of them.
+    """
+    rich_pages = _clean_site()
+    plain_pages = [
+        _page(
+            url=p.url, normalized_url=p.normalized_url, canonical_url=p.canonical_url,
+            title=p.title, meta_description=p.meta_description, crawl_depth=p.crawl_depth,
+            question_heading_count=0, list_count=0, table_count=0, has_definition_list=False,
+            has_author_byline=False,
+        )
+        for p in rich_pages
+    ]
+
+    rich_score = compute_spy_score(pages=rich_pages, findings=run_all_rules(rich_pages, []), urls_processed=len(rich_pages))
+    plain_score = compute_spy_score(pages=plain_pages, findings=run_all_rules(plain_pages, []), urls_processed=len(plain_pages))
+
+    assert rich_score.aeo_score > plain_score.aeo_score
+    assert rich_score.evidence["aeo"]["question_coverage_pct"] == 100.0
+    assert plain_score.evidence["aeo"]["question_coverage_pct"] == 0.0
+    assert rich_score.evidence["aeo"]["structured_content_pct"] == 100.0
+    assert plain_score.evidence["aeo"]["structured_content_pct"] == 0.0
+    assert rich_score.evidence["aeo"]["byline_coverage_pct"] == 100.0
+    assert plain_score.evidence["aeo"]["byline_coverage_pct"] == 0.0
+
+
+def test_geo_score_penalizes_inconsistent_organization_names() -> None:
+    """§49 entity consistency: the same brand naming itself differently on
+    different pages is a real inconsistency signal (mirrors the
+    SEO_SCHEMA_007 rule's own check), not a manufactured penalty.
+    """
+    consistent_pages = _clean_site()
+    inconsistent_pages = _clean_site()
+    inconsistent_pages[-1].schema_blocks = [
+        {"@type": "Organization", "name": "A Totally Different Name", "url": "https://example.com"}
+    ]
+
+    consistent_score = compute_spy_score(
+        pages=consistent_pages, findings=run_all_rules(consistent_pages, []), urls_processed=len(consistent_pages)
+    )
+    inconsistent_score = compute_spy_score(
+        pages=inconsistent_pages, findings=run_all_rules(inconsistent_pages, []), urls_processed=len(inconsistent_pages)
+    )
+
+    assert consistent_score.evidence["geo"]["entity_name_consistency_pct"] == 100.0
+    assert inconsistent_score.evidence["geo"]["entity_name_consistency_pct"] == 0.0
+    assert inconsistent_score.geo_score < consistent_score.geo_score
+
+
+def test_geo_score_rewards_citation_readiness() -> None:
+    """§49 citation readiness: pages that link out to external sources are a
+    real, measurable signal once the caller supplies the crawl's page links —
+    absent that evidence, the signal is 0, never guessed."""
+    pages = _clean_site()
+    findings = run_all_rules(pages, [])
+
+    without_citations = compute_spy_score(pages=pages, findings=findings, urls_processed=len(pages))
+    with_citations = compute_spy_score(
+        pages=pages, findings=findings, urls_processed=len(pages), links=_citation_links(pages)
+    )
+
+    assert without_citations.evidence["geo"]["citation_readiness_pct"] == 0.0
+    assert with_citations.evidence["geo"]["citation_readiness_pct"] == 100.0
+    assert with_citations.geo_score > without_citations.geo_score
+
+
+def test_geo_score_rewards_organization_field_completeness() -> None:
+    """A bare `{"@type": "Organization"}` is a much weaker GEO entity signal
+    than one with logo and sameAs social profiles filled in (§49)."""
+    rich_pages = _clean_site()
+    bare_pages = _clean_site()
+    for p in bare_pages:
+        p.schema_blocks = [{"@type": "Organization", "name": "Example Co", "url": "https://example.com"}]
+
+    rich_score = compute_spy_score(pages=rich_pages, findings=run_all_rules(rich_pages, []), urls_processed=len(rich_pages))
+    bare_score = compute_spy_score(pages=bare_pages, findings=run_all_rules(bare_pages, []), urls_processed=len(bare_pages))
+
+    assert rich_score.evidence["geo"]["org_field_completeness_pct"] == 100.0
+    assert bare_score.evidence["geo"]["org_field_completeness_pct"] == 50.0
+    assert rich_score.geo_score > bare_score.geo_score

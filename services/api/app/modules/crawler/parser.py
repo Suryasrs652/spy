@@ -25,6 +25,12 @@ _GENERIC_ALT_RE = re.compile(
     re.I,
 )
 
+# §48 AEO "question coverage": a heading counts as question-style if it's
+# phrased as a natural-language question, not just any heading ending in "?".
+_QUESTION_START_RE = re.compile(
+    r"^(who|what|when|where|why|how|which|can|does|do|is|are|should|will)\b", re.I
+)
+
 
 @dataclass
 class ExtractedLink:
@@ -76,6 +82,11 @@ class ParsedPage:
     hreflang_tags: list[HreflangTag] = field(default_factory=list)
     has_insecure_form_action: bool = False
     word_frequency_top_ratio: float = 0.0
+    question_heading_count: int = 0
+    list_count: int = 0
+    table_count: int = 0
+    has_definition_list: bool = False
+    has_author_byline: bool = False
 
 
 def _clean_text(text: str | None) -> str | None:
@@ -130,6 +141,10 @@ def parse_html(*, page_url: str, html: str, base_origin: str) -> ParsedPage:
     result.links = _extract_links(soup, page_url=page_url, base_origin=base_origin)
     result.mixed_content = _has_mixed_content(soup, page_url)
     result.has_insecure_form_action = _has_insecure_form_action(soup, page_url)
+    result.list_count = len(soup.find_all(["ul", "ol"]))
+    result.table_count = len(soup.find_all("table"))
+    result.has_definition_list = any(dl.find("dt") and dl.find("dd") for dl in soup.find_all("dl"))
+    result.has_author_byline = _has_author_byline(soup)
 
     return result
 
@@ -141,8 +156,16 @@ def _extract_headings(soup: BeautifulSoup, result: ParsedPage) -> None:
     result.h2_count = len(soup.find_all("h2"))
     result.h3_count = len(soup.find_all("h3"))
 
-    sequence = [tag.name for tag in soup.find_all(re.compile(r"^h[1-6]$"))]
+    heading_tags = soup.find_all(re.compile(r"^h[1-6]$"))
+    sequence = [tag.name for tag in heading_tags]
     result.heading_sequence = sequence
+
+    for tag in heading_tags:
+        text = (_clean_text(tag.get_text()) or "").strip()
+        if not text:
+            continue
+        if text.endswith("?") or _QUESTION_START_RE.match(text):
+            result.question_heading_count += 1
 
     # A heading hierarchy is "valid" if it never jumps down more than one
     # level at a time (e.g. H2 -> H4 with no H3 in between is a skip).
@@ -253,6 +276,28 @@ def _has_insecure_form_action(soup: BeautifulSoup, page_url: str) -> bool:
         if action.lower().startswith("http://"):
             return True
     return False
+
+
+_BYLINE_HINT_RE = re.compile(r"\b(author|byline)\b", re.I)
+
+
+def _has_author_byline(soup: BeautifulSoup) -> bool:
+    """§48 "source attribution" signal: a deterministic, structural check for
+    authorship markup — never guesses a name from free text. Covers the three
+    common conventions: a <meta name="author">, rel="author" (HTML5 link
+    relation for the page's author), and itemprop="author" (schema.org
+    microdata) or an author/byline class hook used by most CMS themes.
+    """
+    if soup.find("meta", attrs={"name": re.compile("^author$", re.I)}):
+        return True
+    if soup.find(attrs={"itemprop": re.compile("^author$", re.I)}):
+        return True
+    for tag in soup.find_all(attrs={"rel": True}):
+        rel = tag.get("rel") or []
+        rel_values = rel if isinstance(rel, list) else rel.split()
+        if any(v.lower() == "author" for v in rel_values):
+            return True
+    return bool(soup.find(class_=_BYLINE_HINT_RE) or soup.find(id=_BYLINE_HINT_RE))
 
 
 def _extract_schema(soup: BeautifulSoup, result: ParsedPage) -> None:

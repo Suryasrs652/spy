@@ -128,7 +128,9 @@ async def _run_audit_async(audit_id: str) -> None:
             await db.commit()
 
             await _set_status(db, audit, job, AuditStatus.SCORING.value)
-            score = compute_spy_score(pages=result.pages, findings=findings, urls_processed=result.urls_processed)
+            score = compute_spy_score(
+                pages=result.pages, findings=findings, urls_processed=result.urls_processed, links=result.links
+            )
             audit.spy_score = score.spy_score
             audit.technical_score = score.technical_score
             audit.seo_score = score.seo_score

@@ -9,16 +9,17 @@ under a new version string and never mutates a completed audit's score
 Authority has no data source in M1 (backlinks ship in M1.2 per the roadmap)
 so it is reported as unavailable rather than a manufactured guess — its
 weight is proportionally redistributed across the components that *do* have
-real evidence, per §3's "never manufacture certainty" principle. AEO/GEO use
-a reduced signal set (schema presence/type, heading structure) rather than
-the full §48/§49 checklists — documented in the docstrings below, not
-claimed as complete.
+real evidence, per §3's "never manufacture certainty" principle. AEO (§48)
+and GEO (§49) are computed from the full deterministic signal set the M2
+crawler extracts — question-phrased headings, structured content (lists/
+tables/definitions), author bylines, and full JSON-LD schema blocks — rather
+than M1's reduced subset (schema presence + heading hygiene only).
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from app.modules.crawler.models import CrawlPage
+from app.modules.crawler.models import CrawlPage, PageLink
 from app.modules.seo.rules import RuleFinding
 
 CURRENT_SCORE_VERSION = "spy-score-v1.0"
@@ -83,11 +84,51 @@ def _performance_score(pages: list[CrawlPage]) -> float:
     return round(100.0 - ((avg_ms - 500) / (5000 - 500)) * 100.0, 2)
 
 
+_ORG_RICH_FIELDS = ("name", "url", "logo", "sameAs")
+
+
+def _schema_blocks_of_type(pages: list[CrawlPage], type_name: str):
+    """Yields (page, block) for every stored JSON-LD block declaring
+    `type_name`, mirroring the @type-as-str-or-list handling the structured-
+    data rules already use (app/modules/seo/rules/structured_data.py).
+    """
+    for p in pages:
+        for block in p.schema_blocks or []:
+            block_type = block.get("@type")
+            types = block_type if isinstance(block_type, list) else [block_type]
+            if type_name in types:
+                yield p, block
+
+
+def _question_coverage_pct(indexable: list[CrawlPage]) -> float:
+    return 100 * sum(1 for p in indexable if p.question_heading_count > 0) / len(indexable)
+
+
+def _structured_content_pct(indexable: list[CrawlPage]) -> float:
+    return 100 * sum(
+        1 for p in indexable if p.list_count > 0 or p.table_count > 0 or p.has_definition_list
+    ) / len(indexable)
+
+
+def _byline_coverage_pct(indexable: list[CrawlPage]) -> float:
+    return 100 * sum(1 for p in indexable if p.has_author_byline) / len(indexable)
+
+
 def _aeo_score(pages: list[CrawlPage]) -> tuple[float, dict]:
-    """§48 reduced subset: schema coverage, FAQ-schema presence, and
-    heading-hierarchy cleanliness (one H1 per page). Full §48 (direct-answer
-    quality, citation readability, author/org bylines) needs content-quality
-    signals this crawler doesn't extract yet.
+    """§48 full AEO composition, all deterministic and re-derivable from
+    stored crawl evidence:
+      - schema coverage (machine-readable structure)
+      - FAQPage schema presence (explicit Q&A structure)
+      - question coverage (headings phrased as natural-language questions —
+        a broader "does this page answer questions" signal than FAQ schema
+        alone, since most sites answer questions in prose H2/H3s, not
+        formal FAQ blocks)
+      - structured-answer readability (lists/tables/definition lists, which
+        answer engines and AI crawlers extract far more reliably than prose)
+      - heading hygiene (one H1 per page — answer engines use it to find
+        the page's primary topic)
+      - source attribution (author/byline markup — §48 "citation
+        readability": AI systems favor content with clear authorship)
     """
     indexable = [p for p in pages if p.indexable]
     if not indexable:
@@ -95,21 +136,74 @@ def _aeo_score(pages: list[CrawlPage]) -> tuple[float, dict]:
 
     schema_coverage_pct = 100 * sum(1 for p in indexable if p.has_schema) / len(indexable)
     clean_heading_pct = 100 * sum(1 for p in indexable if p.h1_count == 1) / len(indexable)
+    question_coverage_pct = _question_coverage_pct(indexable)
+    structured_content_pct = _structured_content_pct(indexable)
+    byline_coverage_pct = _byline_coverage_pct(indexable)
     has_faq_schema = any("FAQPage" in (p.schema_types or []) for p in pages)
 
-    score = 0.4 * schema_coverage_pct + 0.3 * clean_heading_pct + 0.3 * (100 if has_faq_schema else 40)
+    score = (
+        0.20 * schema_coverage_pct
+        + 0.15 * clean_heading_pct
+        + 0.15 * question_coverage_pct
+        + 0.20 * structured_content_pct
+        + 0.15 * byline_coverage_pct
+        + 0.15 * (100 if has_faq_schema else 40)
+    )
     return round(score, 2), {
         "schema_coverage_pct": round(schema_coverage_pct, 1),
         "clean_heading_pct": round(clean_heading_pct, 1),
+        "question_coverage_pct": round(question_coverage_pct, 1),
+        "structured_content_pct": round(structured_content_pct, 1),
+        "byline_coverage_pct": round(byline_coverage_pct, 1),
         "has_faq_schema": has_faq_schema,
     }
 
 
-def _geo_score(pages: list[CrawlPage]) -> tuple[float, dict]:
-    """§49 reduced subset: Organization-entity clarity and machine-readable
-    structure (schema presence). Full §49 (topical coverage, original
-    evidence, citation readiness) needs content-topic modeling out of scope
-    for M1.
+def _org_field_completeness_pct(pages: list[CrawlPage]) -> float | None:
+    orgs = list(_schema_blocks_of_type(pages, "Organization"))
+    if not orgs:
+        return None
+    total_fields = len(_ORG_RICH_FIELDS) * len(orgs)
+    present = sum(1 for _p, block in orgs for f in _ORG_RICH_FIELDS if block.get(f))
+    return 100 * present / total_fields
+
+
+def _entity_name_consistency_pct(pages: list[CrawlPage]) -> float | None:
+    names = {block["name"] for _p, block in _schema_blocks_of_type(pages, "Organization") if block.get("name")}
+    if not names:
+        return None
+    return 100.0 if len(names) == 1 else 0.0
+
+
+def _citation_readiness_pct(indexable: list[CrawlPage], links: list[PageLink] | None) -> float:
+    if not links:
+        return 0.0
+    pages_with_outbound_citation = {link.source_page_id for link in links if not link.is_internal}
+    return 100 * sum(1 for p in indexable if p.id in pages_with_outbound_citation) / len(indexable)
+
+
+def _geo_score(pages: list[CrawlPage], links: list[PageLink] | None = None) -> tuple[float, dict]:
+    """§49 full GEO composition, all deterministic and re-derivable from
+    stored crawl evidence:
+      - Organization-entity presence (is there a declared entity at all)
+      - Organization field completeness (name/url/logo/sameAs — a bare
+        `{"@type":"Organization"}` is a much weaker entity signal than one
+        with a logo and verified social profiles via sameAs)
+      - entity-name consistency across pages (a brand that names itself
+        differently on different pages is an inconsistent entity signal
+        that confuses AI systems about who they're citing — same check the
+        SEO_SCHEMA_007 rule flags, reused here as a score input)
+      - Person/Product/Service schema presence (a richer entity graph
+        beyond just the organization itself)
+      - machine-readable structure (overall schema coverage)
+      - citation readiness (pages that link out to external sources, which
+        AI answer engines weight as an evidence/citation signal, §49)
+
+    Components with no evidence anywhere on the site (no Organization schema
+    at all, so completeness/consistency are undefined rather than "zero")
+    are dropped and the remaining weights rescaled — the same pattern
+    `_redistribute_weights` uses for the top-level Spy Score, so an
+    unmeasured signal is never silently scored as a failure.
     """
     indexable = [p for p in pages if p.indexable]
     if not indexable:
@@ -117,11 +211,32 @@ def _geo_score(pages: list[CrawlPage]) -> tuple[float, dict]:
 
     has_org_schema = any("Organization" in (p.schema_types or []) for p in pages)
     schema_coverage_pct = 100 * sum(1 for p in indexable if p.has_schema) / len(indexable)
+    org_completeness_pct = _org_field_completeness_pct(pages)
+    entity_consistency_pct = _entity_name_consistency_pct(pages)
+    has_entity_schema = any(
+        t in (p.schema_types or []) for p in pages for t in ("Person", "Product", "Service")
+    )
+    citation_readiness_pct = _citation_readiness_pct(indexable, links)
 
-    score = 0.5 * (100 if has_org_schema else 30) + 0.5 * schema_coverage_pct
+    components: dict[str, tuple[float | None, float]] = {
+        "org_presence": (100.0 if has_org_schema else 30.0, 0.20),
+        "schema_coverage": (schema_coverage_pct, 0.15),
+        "org_completeness": (org_completeness_pct, 0.20),
+        "entity_consistency": (entity_consistency_pct, 0.15),
+        "entity_schema": (100.0 if has_entity_schema else 40.0, 0.15),
+        "citation_readiness": (citation_readiness_pct, 0.15),
+    }
+    present = {k: (v, w) for k, (v, w) in components.items() if v is not None}
+    total_weight = sum(w for _v, w in present.values())
+    score = sum(v * (w / total_weight) for v, w in present.values())
+
     return round(score, 2), {
         "has_organization_schema": has_org_schema,
         "schema_coverage_pct": round(schema_coverage_pct, 1),
+        "org_field_completeness_pct": round(org_completeness_pct, 1) if org_completeness_pct is not None else None,
+        "entity_name_consistency_pct": entity_consistency_pct,
+        "has_person_or_product_schema": has_entity_schema,
+        "citation_readiness_pct": round(citation_readiness_pct, 1),
     }
 
 
@@ -137,7 +252,12 @@ def _redistribute_weights(available: dict[str, float | None]) -> dict[str, float
 
 
 def compute_spy_score(
-    *, pages: list[CrawlPage], findings: list[RuleFinding], urls_processed: int, target_sample_size: int = 20
+    *,
+    pages: list[CrawlPage],
+    findings: list[RuleFinding],
+    urls_processed: int,
+    links: list[PageLink] | None = None,
+    target_sample_size: int = 20,
 ) -> ScoreBreakdown:
     total_pages = len([p for p in pages if p.status_code is not None]) or 1
 
@@ -148,7 +268,7 @@ def compute_spy_score(
     performance = _performance_score(pages)
     authority: float | None = None  # no backlink data source until M1.2
     aeo, aeo_evidence = _aeo_score(pages)
-    geo, geo_evidence = _geo_score(pages)
+    geo, geo_evidence = _geo_score(pages, links)
 
     # "architecture" (internal linking/orphans/depth, §21's "Internal
     # architecture" weight) contributes to the composite but has no

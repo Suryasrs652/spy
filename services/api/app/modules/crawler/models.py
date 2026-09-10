@@ -87,6 +87,14 @@ class CrawlPage(UUIDPKMixin, Base):
     schema_blocks: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
     is_redirect_loop: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # Full §48/§49 AEO/GEO signals — question coverage, structured-answer
+    # readability (lists/tables/definitions), and source attribution.
+    question_heading_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    list_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    table_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    has_definition_list: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    has_author_byline: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 
