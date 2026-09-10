@@ -23,6 +23,7 @@ from app.db.session import AsyncSessionLocal
 from app.modules.admin.models import RuleConfig
 from app.modules.audits.models import Audit, AuditJob, AuditStatus, FailureCategory, FailureCode
 from app.modules.auth.models import User
+from app.modules.backlinks.service import get_backlink_summary, record_discovered_backlinks
 from app.modules.crawler.engine import CrawlFailure, crawl_site
 from app.modules.entitlements.service import consume_entitlement_for_audit, release_entitlement_for_audit
 from app.modules.notifications.service import notify_audit_completed, notify_audit_failed
@@ -30,6 +31,7 @@ from app.modules.projects.models import Project
 from app.modules.recommendations.engine import build_recommendations
 from app.modules.recommendations.models import Recommendation
 from app.modules.reports.service import generate_pdf_report
+from app.modules.scoring.pagerank import compute_internal_pagerank, normalize_to_100
 from app.modules.scoring.spy_score import compute_spy_score
 from app.modules.seo.models import AuditIssue, AuditIssuePage
 from app.modules.seo.rules import run_all_rules
@@ -96,9 +98,22 @@ async def _run_audit_async(audit_id: str) -> None:
                 max_urls=audit.max_urls, on_progress=on_progress,
             )
 
+            pagerank_by_page_id = normalize_to_100(compute_internal_pagerank(result.pages, result.links))
+            for page in result.pages:
+                page.internal_pagerank = pagerank_by_page_id.get(page.id)
+
             db.add_all(result.pages)
             db.add_all(result.links)
             await db.commit()
+
+            # §144/M5 — every crawl also teaches Spy about the *target*
+            # site's own outbound links, which are backlink facts for
+            # wherever those links point. Independent of this audit's own
+            # data (never blocks/fails the audit on error).
+            try:
+                await record_discovered_backlinks(db, audit_id=audit.id, pages=result.pages, links=result.links)
+            except Exception:  # noqa: BLE001
+                logger.warning("backlink_recording_failed", audit_id=audit_id, exc_info=True)
 
             await _set_status(
                 db, audit, job, AuditStatus.ANALYZING.value,
@@ -130,8 +145,10 @@ async def _run_audit_async(audit_id: str) -> None:
             await db.commit()
 
             await _set_status(db, audit, job, AuditStatus.SCORING.value)
+            backlink_summary = await get_backlink_summary(db, domain=project.domain)
             score = compute_spy_score(
-                pages=result.pages, findings=findings, urls_processed=result.urls_processed, links=result.links
+                pages=result.pages, findings=findings, urls_processed=result.urls_processed, links=result.links,
+                referring_domains=backlink_summary["referring_domains"], total_backlinks=backlink_summary["total_backlinks"],
             )
             audit.spy_score = score.spy_score
             audit.technical_score = score.technical_score

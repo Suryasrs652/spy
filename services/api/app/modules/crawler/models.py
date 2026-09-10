@@ -95,6 +95,12 @@ class CrawlPage(UUIDPKMixin, Base):
     has_definition_list: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     has_author_byline: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # §144/M5 — internal PageRank (app/modules/scoring/pagerank.py),
+    # normalized 0-100 with the top-ranked page (usually the homepage) at
+    # 100. Computed post-crawl once the full link graph is known, so it's
+    # nullable until that step runs.
+    internal_pagerank: Mapped[float | None] = mapped_column(Numeric(6, 2))
+
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 
 

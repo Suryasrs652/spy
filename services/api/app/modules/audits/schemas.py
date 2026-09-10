@@ -75,6 +75,7 @@ class AuditPageOut(BaseModel):
     indexable: bool
     word_count: int | None
     crawl_depth: int
+    internal_pagerank: float | None = None
 
 
 class RecommendationOut(BaseModel):

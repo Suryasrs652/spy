@@ -6,17 +6,22 @@ under (`CURRENT_SCORE_VERSION`); a later change to weights or formulas ships
 under a new version string and never mutates a completed audit's score
 (§22, §132).
 
-Authority has no data source in M1 (backlinks ship in M1.2 per the roadmap)
-so it is reported as unavailable rather than a manufactured guess — its
-weight is proportionally redistributed across the components that *do* have
-real evidence, per §3's "never manufacture certainty" principle. AEO (§48)
-and GEO (§49) are computed from the full deterministic signal set the M2
-crawler extracts — question-phrased headings, structured content (lists/
-tables/definitions), author bylines, and full JSON-LD schema blocks — rather
-than M1's reduced subset (schema presence + heading hygiene only).
+Authority (§144/M5) is built from internal PageRank plus Spy's own
+crawl-derived backlink index (app/modules/backlinks) — real evidence, but
+still reported as unavailable (weight redistributed to the components that
+do have data, per §3's "never manufacture certainty" principle) whenever
+that index has zero referring domains for this site, since that could mean
+either "genuinely no backlinks" or just "nobody Spy has crawled yet happens
+to link here" and the two must never look the same as a confident low
+score. AEO (§48) and GEO (§49) are computed from the full deterministic
+signal set the M2 crawler extracts — question-phrased headings, structured
+content (lists/tables/definitions), author bylines, and full JSON-LD schema
+blocks — rather than M1's reduced subset (schema presence + heading
+hygiene only).
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 from app.modules.crawler.models import CrawlPage, PageLink
@@ -240,6 +245,45 @@ def _geo_score(pages: list[CrawlPage], links: list[PageLink] | None = None) -> t
     }
 
 
+def _authority_score(pages: list[CrawlPage], *, referring_domains: int, total_backlinks: int) -> tuple[float | None, dict]:
+    """§144/M5 — Spy Authority, built from real evidence Spy now has:
+    internal PageRank distribution (this audit's own crawl) and Spy's own
+    crawl-derived backlink index (app/modules/backlinks). That index only
+    contains domains Spy has *already* crawled while auditing someone
+    else's site — a brand-new domain, or one nobody happens to have linked
+    to from an already-audited site yet, will show zero referring domains
+    regardless of its real-world backlink profile. Reporting a low score
+    in that case would manufacture a negative signal indistinguishable
+    from "genuinely has no backlinks" (§3) — so this returns None (like
+    the M1-M4 "no data source" case it replaces) until there is at least
+    one real referring domain to base a number on.
+    """
+    if referring_domains == 0:
+        return None, {
+            "referring_domains": 0, "total_backlinks": 0,
+            "reason": "no backlinks discovered yet in Spy's own crawl index",
+        }
+
+    indexable = [p for p in pages if p.indexable]
+    pageranks = [float(p.internal_pagerank) for p in indexable if p.internal_pagerank is not None]
+    avg_pagerank = sum(pageranks) / len(pageranks) if pageranks else 0.0
+
+    # Referring domains, log-scaled: 1->10 matters far more than 100->110,
+    # and Spy's own index is nowhere near web-scale yet, so a modest cap
+    # (50 referring domains -> 100) avoids implying more precision than
+    # this evidence actually supports.
+    referring_domains_score = min(100.0, 100 * math.log10(referring_domains + 1) / math.log10(51))
+
+    score = 0.7 * referring_domains_score + 0.3 * avg_pagerank
+    return round(score, 2), {
+        "referring_domains": referring_domains,
+        "total_backlinks": total_backlinks,
+        "referring_domains_score": round(referring_domains_score, 1),
+        "avg_internal_pagerank": round(avg_pagerank, 1),
+        "coverage_caveat": "based on Spy's own crawl-discovered backlink index, not a comprehensive web-scale backlink database",
+    }
+
+
 def _redistribute_weights(available: dict[str, float | None]) -> dict[str, float]:
     """Drop components with no data (currently just `authority` in M1) and
     scale the remaining weights back up to sum to 1.0, rather than silently
@@ -258,6 +302,8 @@ def compute_spy_score(
     urls_processed: int,
     links: list[PageLink] | None = None,
     target_sample_size: int = 20,
+    referring_domains: int = 0,
+    total_backlinks: int = 0,
 ) -> ScoreBreakdown:
     total_pages = len([p for p in pages if p.status_code is not None]) or 1
 
@@ -266,7 +312,9 @@ def compute_spy_score(
     content = _category_score(findings, _CONTENT_CATEGORIES, total_pages)
     architecture = _category_score(findings, _ARCHITECTURE_CATEGORIES, total_pages)
     performance = _performance_score(pages)
-    authority: float | None = None  # no backlink data source until M1.2
+    authority, authority_evidence = _authority_score(
+        pages, referring_domains=referring_domains, total_backlinks=total_backlinks
+    )
     aeo, aeo_evidence = _aeo_score(pages)
     geo, geo_evidence = _geo_score(pages, links)
 
@@ -298,6 +346,7 @@ def compute_spy_score(
         evidence={
             "weights_used": weights,
             "architecture_score": architecture,
+            "authority": authority_evidence,
             "aeo": aeo_evidence,
             "geo": geo_evidence,
             "total_pages_scored": total_pages,

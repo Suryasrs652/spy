@@ -104,3 +104,34 @@ def test_clean_site_has_minimal_findings() -> None:
     findings = run_all_rules(pages, [])
     high_or_critical = [f for f in findings if f.severity.value in ("CRITICAL", "HIGH")]
     assert high_or_critical == [], f"clean site should have no HIGH/CRITICAL findings, got {high_or_critical}"
+
+
+def test_weakly_linked_sitemap_page_detected() -> None:
+    pages = [
+        _page(from_sitemap=True, internal_pagerank=3.5),
+        _page(url="https://example.com/other", normalized_url="https://example.com/other", from_sitemap=True, internal_pagerank=80.0),
+    ]
+    findings = run_all_rules(pages, [])
+    finding = _find(findings, "SEO_LINK_016")
+    assert finding is not None
+    assert finding.affected_count == 1
+
+
+def test_non_sitemap_page_with_low_pagerank_not_flagged() -> None:
+    pages = [_page(from_sitemap=False, internal_pagerank=1.0)]
+    findings = run_all_rules(pages, [])
+    assert _find(findings, "SEO_LINK_016") is None
+
+
+def test_sitemap_page_with_healthy_pagerank_not_flagged() -> None:
+    pages = [_page(from_sitemap=True, internal_pagerank=50.0)]
+    findings = run_all_rules(pages, [])
+    assert _find(findings, "SEO_LINK_016") is None
+
+
+def test_missing_pagerank_data_not_flagged() -> None:
+    """internal_pagerank is None until the post-crawl computation runs —
+    must never be treated as "zero" and flagged."""
+    pages = [_page(from_sitemap=True, internal_pagerank=None)]
+    findings = run_all_rules(pages, [])
+    assert _find(findings, "SEO_LINK_016") is None

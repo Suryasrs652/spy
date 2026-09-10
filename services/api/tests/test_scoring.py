@@ -230,3 +230,61 @@ def test_geo_score_rewards_organization_field_completeness() -> None:
     assert rich_score.evidence["geo"]["org_field_completeness_pct"] == 100.0
     assert bare_score.evidence["geo"]["org_field_completeness_pct"] == 50.0
     assert rich_score.geo_score > bare_score.geo_score
+
+
+def test_authority_score_absent_without_any_referring_domains() -> None:
+    """§144/M5 — zero referring domains in Spy's own index must never read
+    as a confident low authority score; it means "no evidence yet," not
+    "genuinely has no backlinks" (§3)."""
+    pages = _clean_site()
+    score = compute_spy_score(pages=pages, findings=run_all_rules(pages, []), urls_processed=len(pages))
+    assert score.authority_score is None
+    assert score.evidence["authority"]["referring_domains"] == 0
+    assert "authority" not in score.evidence["weights_used"]
+
+
+def test_authority_score_present_with_referring_domains() -> None:
+    pages = _clean_site()
+    for p in pages:
+        p.internal_pagerank = 50.0
+    score = compute_spy_score(
+        pages=pages, findings=run_all_rules(pages, []), urls_processed=len(pages),
+        referring_domains=5, total_backlinks=12,
+    )
+    assert score.authority_score is not None
+    assert score.authority_score > 0
+    assert score.evidence["authority"]["referring_domains"] == 5
+    assert score.evidence["authority"]["total_backlinks"] == 12
+    assert "authority" in score.evidence["weights_used"]
+
+
+def test_authority_score_increases_with_more_referring_domains() -> None:
+    pages = _clean_site()
+    for p in pages:
+        p.internal_pagerank = 50.0
+    few = compute_spy_score(
+        pages=pages, findings=run_all_rules(pages, []), urls_processed=len(pages), referring_domains=1, total_backlinks=1,
+    )
+    many = compute_spy_score(
+        pages=pages, findings=run_all_rules(pages, []), urls_processed=len(pages), referring_domains=40, total_backlinks=100,
+    )
+    assert many.authority_score > few.authority_score
+
+
+def test_authority_score_rewards_higher_internal_pagerank() -> None:
+    low_pr_pages = _clean_site()
+    high_pr_pages = _clean_site()
+    for p in low_pr_pages:
+        p.internal_pagerank = 5.0
+    for p in high_pr_pages:
+        p.internal_pagerank = 90.0
+
+    low = compute_spy_score(
+        pages=low_pr_pages, findings=run_all_rules(low_pr_pages, []), urls_processed=len(low_pr_pages),
+        referring_domains=5, total_backlinks=5,
+    )
+    high = compute_spy_score(
+        pages=high_pr_pages, findings=run_all_rules(high_pr_pages, []), urls_processed=len(high_pr_pages),
+        referring_domains=5, total_backlinks=5,
+    )
+    assert high.authority_score > low.authority_score

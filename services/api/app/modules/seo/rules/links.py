@@ -327,6 +327,31 @@ def anchor_text_over_optimization(ctx: RuleContext) -> RuleFinding | None:
 
 
 @rule
+def weakly_linked_sitemap_pages(ctx: RuleContext) -> RuleFinding | None:
+    """§144/M5 — a page the sitemap declares important but that internal
+    linking barely supports (low internal PageRank, app/modules/scoring/
+    pagerank.py) is a real, measurable mismatch between stated and actual
+    site architecture, not a guess.
+    """
+    threshold = ctx.config["MIN_PAGERANK_FOR_SITEMAP_PAGES"]
+    affected = [
+        (p.id, {"url": p.url, "internal_pagerank": float(p.internal_pagerank)})
+        for p in ctx.indexable()
+        if p.from_sitemap and p.internal_pagerank is not None and float(p.internal_pagerank) < threshold
+    ]
+    if not affected:
+        return None
+    return RuleFinding(
+        "SEO_LINK_016", "Links", Severity.LOW,
+        "Sitemap pages with weak internal linking",
+        "These pages are listed in the sitemap (signaling they matter) but internal linking gives them very "
+        "little link equity relative to the rest of the site.",
+        "Add contextual internal links from higher-authority pages (navigation, related content) to these URLs.",
+        score_impact=-0.25 * len(affected), affected=affected,
+    )
+
+
+@rule
 def http_internal_links_on_https_site(ctx: RuleContext) -> RuleFinding | None:
     by_page = defaultdict(int)
     for link in ctx.links:

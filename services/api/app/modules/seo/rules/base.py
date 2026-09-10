@@ -38,6 +38,8 @@ DEFAULT_THRESHOLDS = {
     "MAX_INTERNAL_LINKS": 150,
     "MIN_AVG_INTERNAL_LINKS_PER_PAGE": 1.0,
     "MAX_NOFOLLOW_INTERNAL_RATIO": 0.5,
+    # M5 addition — §144 internal PageRank (0-100 normalized, top page = 100).
+    "MIN_PAGERANK_FOR_SITEMAP_PAGES": 10.0,
 }
 
 
