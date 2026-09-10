@@ -112,12 +112,74 @@ export interface Audit {
   geo_score: number | null;
   confidence: number | null;
   score_version: string;
+  evidence: AuditEvidence;
   failure_category: string | null;
   failure_code: string | null;
   failure_message: string | null;
   started_at: string | null;
   completed_at: string | null;
   created_at: string;
+}
+
+export interface AuditEvidence {
+  weights_used?: Record<string, number>;
+  architecture_score?: number;
+  authority?: {
+    referring_domains?: number;
+    total_backlinks?: number;
+    reason?: string;
+  };
+  aeo?: {
+    schema_coverage_pct?: number;
+    clean_heading_pct?: number;
+    question_coverage_pct?: number;
+    structured_content_pct?: number;
+    byline_coverage_pct?: number;
+    has_faq_schema?: boolean;
+    reason?: string;
+  };
+  geo?: {
+    has_organization_schema?: boolean;
+    schema_coverage_pct?: number;
+    org_field_completeness_pct?: number | null;
+    entity_name_consistency_pct?: number | null;
+    has_person_or_product_schema?: boolean;
+    citation_readiness_pct?: number;
+    reason?: string;
+  };
+  total_pages_scored?: number;
+  urls_processed?: number;
+}
+
+export interface AuditPage {
+  id: string;
+  url: string;
+  normalized_url: string;
+  status_code: number | null;
+  title: string | null;
+  meta_description: string | null;
+  h1: string | null;
+  canonical_url: string | null;
+  indexable: boolean;
+  word_count: number | null;
+  crawl_depth: number;
+  internal_pagerank: number | null;
+  response_ms: number | null;
+  redirect_count: number;
+  robots_allowed: boolean;
+  from_sitemap: boolean;
+  h1_count: number;
+  h2_count: number;
+  h3_count: number;
+  heading_order_valid: boolean;
+  has_schema: boolean;
+  schema_types: string[];
+  question_heading_count: number;
+  list_count: number;
+  table_count: number;
+  has_definition_list: boolean;
+  has_author_byline: boolean;
+  images_missing_alt: number;
 }
 
 export interface AuditProgress {
@@ -267,4 +329,74 @@ export interface ContentGap {
   competitor_terms: string[];
   gap_terms: string[];
   methodology: string | null;
+}
+
+export interface GscProperty {
+  id: string;
+  project_id: string | null;
+  site_url: string;
+  permission_level: string;
+  selected: boolean;
+}
+
+export interface GscPerformanceSummary {
+  period: [string, string];
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  average_position: number;
+  source: string;
+}
+
+export interface GscQueryRow {
+  query?: string | null;
+  page?: string | null;
+  clicks: number;
+  impressions: number;
+  ctr: number;
+  position: number;
+}
+
+export interface GscOpportunityKeyword {
+  query: string;
+  clicks: number;
+  impressions: number;
+  position: number;
+  actual_ctr?: number;
+  spy_expected_ctr?: number;
+}
+
+export interface GscPeriodChange {
+  query?: string;
+  page?: string;
+  current_clicks: number;
+  previous_clicks: number;
+  delta: number;
+  pct_change: number;
+}
+
+export interface GscPositionChange {
+  query: string;
+  current_position: number;
+  previous_position: number;
+  delta: number;
+}
+
+export interface GscCannibalization {
+  query: string;
+  competing_pages: { page: string; clicks: number; impressions: number }[];
+}
+
+export interface GscOpportunities {
+  period: { current: [string, string]; previous: [string, string] };
+  striking_distance_keywords: GscOpportunityKeyword[];
+  low_ctr_opportunities: GscOpportunityKeyword[];
+  high_impressions_no_clicks: GscOpportunityKeyword[];
+  declining_keywords: GscPeriodChange[];
+  rising_keywords: GscPeriodChange[];
+  declining_pages: GscPeriodChange[];
+  rising_pages: GscPeriodChange[];
+  position_gains: GscPositionChange[];
+  position_losses: GscPositionChange[];
+  keyword_cannibalization: GscCannibalization[];
 }

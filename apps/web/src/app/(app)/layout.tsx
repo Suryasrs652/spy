@@ -8,12 +8,10 @@ const NAV_LIVE = [
   { href: "/projects", label: "Projects" },
 ];
 
-// Backlinks/Competitors/Rank Tracker shipped in M5, but are project-scoped
-// (no single global URL to link to from here) — reached from a project's
-// own detail page instead, not listed as a top-level nav item.
-const NAV_SOON = [
-  "Site Explorer", "Keywords", "Content Explorer", "Search Console", "AEO", "GEO", "Reports",
-];
+// Site Explorer, Keywords, Content Explorer, Search Console, AEO, GEO and
+// Reports are all project-scoped (no single global URL to link to from
+// here, like Backlinks/Rank Tracker/Competitors before them) — reached from
+// a project's own detail page instead, not listed as top-level nav items.
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
@@ -34,17 +32,6 @@ export default async function AppLayout({ children }: { children: React.ReactNod
             >
               {item.label}
             </Link>
-          ))}
-          <div className="my-3 border-t border-border" />
-          {NAV_SOON.map((label) => (
-            <div
-              key={label}
-              className="flex items-center justify-between px-3 py-2 rounded-md text-sm text-muted/50 cursor-not-allowed"
-              title="Coming in a future milestone"
-            >
-              <span>{label}</span>
-              <span className="text-[10px] uppercase tracking-wide border border-border rounded px-1.5 py-0.5">Soon</span>
-            </div>
           ))}
           <div className="my-3 border-t border-border" />
           <Link href="/billing" className="block px-3 py-2 rounded-md text-sm hover:bg-white/5">

@@ -29,10 +29,17 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         <RunAuditButton projectId={project.id} canRun={!!entitlement?.can_run} reason={entitlement?.reason ?? null} />
       </div>
 
-      <div className="flex gap-4 mt-6 text-sm">
-        <Link href={`/projects/${project.id}/backlinks`} className="text-accent hover:underline">Backlinks</Link>
+      <div className="flex flex-wrap gap-x-4 gap-y-2 mt-6 text-sm">
+        <Link href={`/projects/${project.id}/site-explorer`} className="text-accent hover:underline">Site Explorer</Link>
+        <Link href={`/projects/${project.id}/content-explorer`} className="text-accent hover:underline">Content Explorer</Link>
+        <Link href={`/projects/${project.id}/keywords`} className="text-accent hover:underline">Keywords</Link>
         <Link href={`/projects/${project.id}/rank-tracker`} className="text-accent hover:underline">Rank Tracker</Link>
+        <Link href={`/projects/${project.id}/search-console`} className="text-accent hover:underline">Search Console</Link>
+        <Link href={`/projects/${project.id}/aeo`} className="text-accent hover:underline">AEO</Link>
+        <Link href={`/projects/${project.id}/geo`} className="text-accent hover:underline">GEO</Link>
+        <Link href={`/projects/${project.id}/backlinks`} className="text-accent hover:underline">Backlinks</Link>
         <Link href={`/projects/${project.id}/competitors`} className="text-accent hover:underline">Competitors</Link>
+        <Link href={`/projects/${project.id}/reports`} className="text-accent hover:underline">Reports</Link>
       </div>
 
       <h2 className="text-lg font-semibold mt-10 mb-4">Audit History</h2>
