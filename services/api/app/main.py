@@ -15,14 +15,19 @@ from app.core.errors import (
     validation_exception_handler,
 )
 from app.core.logging import configure_logging
-from app.core.middleware import RequestContextMiddleware
+from app.core.middleware import RequestContextMiddleware, SecurityHeadersMiddleware
 
 settings = get_settings()
 configure_logging(json_logs=settings.is_production)
 
 app = FastAPI(title="Spy API", version="1.0.0")
 
+# Order matters: middleware runs outside-in on the request, inside-out on
+# the response, so SecurityHeadersMiddleware (added second) sees the
+# response last and can safely no-op on a header RequestContextMiddleware
+# or a route already set (setdefault).
 app.add_middleware(RequestContextMiddleware)
+app.add_middleware(SecurityHeadersMiddleware)
 
 app.add_exception_handler(AppError, app_error_handler)
 app.add_exception_handler(StarletteHTTPException, http_exception_handler)

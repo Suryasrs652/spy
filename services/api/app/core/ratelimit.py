@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from fastapi import Request
 
+from app.core.config import get_settings
 from app.core.errors import RateLimitedError
 from app.db.redis import get_redis
 
@@ -35,9 +36,17 @@ async def enforce_rate_limit(
 
 
 def client_ip(request: Request) -> str:
-    forwarded = request.headers.get("X-Forwarded-For")
-    if forwarded:
-        return forwarded.split(",")[0].strip()
+    # §104 — X-Forwarded-For is only trustworthy when a proxy in front of
+    # this process sets it itself (and strips any client-supplied value
+    # first); otherwise any caller can put an arbitrary IP in it and get a
+    # fresh rate-limit bucket on every request. TRUST_PROXY_HEADERS is off
+    # by default (app/core/config.py) so the raw socket peer — which a
+    # request can never spoof — is what gets used unless a real deployment
+    # explicitly vouches for its proxy.
+    if get_settings().trust_proxy_headers:
+        forwarded = request.headers.get("X-Forwarded-For")
+        if forwarded:
+            return forwarded.split(",")[0].strip()
     return request.client.host if request.client else "unknown"
 
 

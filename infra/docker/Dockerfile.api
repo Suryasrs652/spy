@@ -2,7 +2,8 @@ FROM python:3.12-slim AS base
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
-    PIP_NO_CACHE_DIR=1
+    PIP_NO_CACHE_DIR=1 \
+    PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
 
 WORKDIR /app
 
@@ -23,12 +24,34 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-liberation fonts-unifont \
     && rm -rf /var/lib/apt/lists/*
 
+# Non-root user for the production stage. PLAYWRIGHT_BROWSERS_PATH above
+# (rather than the default $HOME/.cache/ms-playwright) keeps the installed
+# Chromium build in a fixed, explicitly-chowned location so it stays
+# reachable after USER drops out of root below — HOME differs per user
+# and root's own cache directory isn't readable by anyone else.
+RUN groupadd --system spy && useradd --system --gid spy --create-home --home-dir /home/spy spy \
+    && mkdir -p /ms-playwright && chown -R spy:spy /ms-playwright /app
+
 COPY requirements.txt .
 RUN pip install -r requirements.txt
-RUN python -m playwright install chromium
+RUN python -m playwright install chromium && chown -R spy:spy /ms-playwright
 
 COPY . .
 RUN chmod +x docker-entrypoint.sh
 
 EXPOSE 8000
+
+# ── Local dev (docker-compose default target) ───────────────────────────
+# Stays root + bind-mount-friendly: the host source tree is mounted over
+# /app for uvicorn --reload, and a non-root UID would otherwise fight the
+# host's file ownership on some Docker Desktop backends.
+FROM base AS dev
+ENTRYPOINT ["./docker-entrypoint.sh"]
+
+# ── Production ───────────────────────────────────────────────────────────
+# No bind mount, no --reload (docker-entrypoint.sh checks ENVIRONMENT), and
+# runs as the unprivileged `spy` user — a compromised worker/API process
+# can't write outside what it was explicitly given.
+FROM base AS production
+USER spy
 ENTRYPOINT ["./docker-entrypoint.sh"]

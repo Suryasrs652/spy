@@ -1,12 +1,33 @@
 FROM node:20-slim AS base
-
-ENV NODE_ENV=development
 WORKDIR /app
 
+# ── Local dev (docker-compose default target) ───────────────────────────
+# Unchanged from before: bind-mount-friendly, root, hot-reload via `next dev`.
+FROM base AS dev
+ENV NODE_ENV=development
 COPY package.json package-lock.json* ./
 RUN npm install
-
 COPY . .
-
 EXPOSE 3000
 CMD ["npm", "run", "dev"]
+
+# ── Production build ─────────────────────────────────────────────────────
+FROM base AS builder
+ENV NODE_ENV=production
+COPY package.json package-lock.json* ./
+RUN npm ci
+COPY . .
+# next.config.ts sets output: "standalone", so this produces a minimal
+# .next/standalone server (only the traced node_modules a page actually
+# imports) instead of shipping the full node_modules tree at runtime.
+RUN npm run build
+
+FROM base AS production
+ENV NODE_ENV=production PORT=3000 HOSTNAME=0.0.0.0
+# node:20-slim ships a non-root `node` user (uid/gid 1000) out of the box.
+COPY --from=builder --chown=node:node /app/public ./public
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+USER node
+EXPOSE 3000
+CMD ["node", "server.js"]

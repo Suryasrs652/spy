@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import UnauthenticatedError
 from app.core.internal_auth import require_internal_service_token
+from app.core.ratelimit import enforce_rate_limit
 from app.core.security import decode_jwt, issue_access_token, issue_refresh_token
 from app.db.session import get_db
 from app.modules.auth import service
@@ -47,6 +48,14 @@ async def _issue_tokens(db: AsyncSession, user_id, email, email_verified) -> Int
 async def verify_credentials(
     payload: VerifyCredentialsRequest, db: AsyncSession = Depends(get_db)
 ) -> InternalUserOut:
+    # §104 — this is the password check itself; Auth.js relays every login
+    # attempt here regardless of source IP, so per-email limiting (rather
+    # than per-IP, which this hop can't see reliably) is what actually
+    # stops an online brute-force or credential-stuffing run against one
+    # account.
+    await enforce_rate_limit(
+        scope="login_attempt", key=payload.email.lower().strip(), limit=10, window_seconds=300
+    )
     user = await service.verify_credentials(db, email=payload.email, password=payload.password)
     return await _issue_tokens(db, user.id, user.email, user.is_email_verified)
 

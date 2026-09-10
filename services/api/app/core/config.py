@@ -2,12 +2,26 @@
 
 All configurable values (§115) are read from environment variables via
 pydantic-settings. Nothing here is a secret's default that would be safe to
-ship — the values in .env.example are local-dev placeholders only.
+ship — the values in .env.example are local-dev placeholders only, and
+§104's production check below refuses to start if any of them are still in
+effect when ENVIRONMENT=production.
 """
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+# Settings fields whose default value is a known, publicly-documented
+# placeholder — safe for local dev, catastrophic if it ever reached a real
+# deployment (an attacker who has read this file, which is a fair
+# assumption for open-source-adjacent code, can forge sessions/tokens or
+# call internal endpoints outright). Checked at startup, not just noted in
+# a comment, per §104.
+_INSECURE_DEFAULTS = {
+    "auth_secret": "insecure-dev-secret-change-me",
+    "internal_service_token": "insecure-dev-internal-token",
+    "token_encryption_key": "0" * 43 + "=",
+}
 
 
 class Settings(BaseSettings):
@@ -37,6 +51,14 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
     celery_broker_url: str = "redis://localhost:6379/1"
     celery_result_backend: str = "redis://localhost:6379/2"
+
+    # §104 — X-Forwarded-For is attacker-controlled input unless something
+    # in front of this process (a load balancer/reverse proxy) sets it
+    # itself and strips any client-supplied copy first. Trusting it
+    # unconditionally lets a caller mint a fresh rate-limit bucket on every
+    # request just by changing the header. Off by default; a real
+    # deployment behind a proxy that guarantees this opts in explicitly.
+    trust_proxy_headers: bool = False
 
     # Auth
     auth_secret: str = "insecure-dev-secret-change-me"
@@ -88,6 +110,18 @@ class Settings(BaseSettings):
     @property
     def is_production(self) -> bool:
         return self.environment == "production"
+
+    @model_validator(mode="after")
+    def _refuse_insecure_defaults_in_production(self) -> "Settings":
+        if not self.is_production:
+            return self
+        leaked = [name for name, default in _INSECURE_DEFAULTS.items() if getattr(self, name) == default]
+        if leaked:
+            raise ValueError(
+                "ENVIRONMENT=production but these settings still hold their insecure placeholder "
+                f"default and MUST be set to a real, private value before starting: {', '.join(leaked)}."
+            )
+        return self
 
 
 @lru_cache

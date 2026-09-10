@@ -39,7 +39,7 @@ class NotFoundError(AppError):
 
 
 class ValidationAppError(AppError):
-    status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
     code = "VALIDATION_ERROR"
 
 
@@ -71,7 +71,7 @@ class PaymentRequiredError(AppError):
 class BlockedTargetError(AppError):
     """SSRF guard rejection (§107, §123)."""
 
-    status_code = status.HTTP_422_UNPROCESSABLE_ENTITY
+    status_code = status.HTTP_422_UNPROCESSABLE_CONTENT
     code = "BLOCKED_TARGET"
 
 
@@ -106,7 +106,7 @@ async def validation_exception_handler(
 ) -> JSONResponse:
     request_id = _request_id(request)
     return JSONResponse(
-        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
         content=_envelope("VALIDATION_ERROR", "One or more fields are invalid.", request_id),
     )
 

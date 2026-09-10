@@ -30,7 +30,13 @@ case "$RUN_MODE" in
   api)
     wait_for_db
     alembic upgrade head
-    exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # --reload (dev-only file-watching) would just add overhead in
+    # production, where the image is rebuilt for every deploy anyway.
+    if [ "${ENVIRONMENT:-development}" = "production" ]; then
+      exec uvicorn app.main:app --host 0.0.0.0 --port 8000
+    else
+      exec uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    fi
     ;;
   worker)
     wait_for_db
