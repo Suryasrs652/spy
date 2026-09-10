@@ -7,6 +7,7 @@ database and rotatable independently of it.
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any, Literal
@@ -28,17 +29,33 @@ _hasher = PasswordHasher()
 DUMMY_PASSWORD_HASH = _hasher.hash("spy-dummy-password-for-constant-time-login-checks")
 
 
-def hash_password(plain: str) -> str:
+def _hash_password_sync(plain: str) -> str:
     return _hasher.hash(plain)
 
 
-def verify_password(plain: str, hashed: str) -> bool:
+def _verify_password_sync(plain: str, hashed: str) -> bool:
     try:
         return _hasher.verify(hashed, plain)
     except VerifyMismatchError:
         return False
     except Exception:  # noqa: BLE001 - malformed hash, tampering, etc.
         return False
+
+
+async def hash_password(plain: str) -> str:
+    # §104 — Argon2id is deliberately CPU/memory-hard (that's the whole
+    # point of it as a password hash), which means calling it synchronously
+    # blocks this process's single asyncio event loop for its full
+    # duration. Under concurrent signups that serializes not just other
+    # signups but every unrelated request the process is handling — a load
+    # test surfaced 50 concurrent signups taking up to ~3.8s each purely
+    # from this queuing, not from Argon2id itself being slow. to_thread
+    # moves the hash to a worker thread so the event loop stays free.
+    return await asyncio.to_thread(_hash_password_sync, plain)
+
+
+async def verify_password(plain: str, hashed: str) -> bool:
+    return await asyncio.to_thread(_verify_password_sync, plain, hashed)
 
 
 TokenType = Literal["access", "refresh", "email_verify", "password_reset", "gsc_oauth_state"]

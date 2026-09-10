@@ -113,3 +113,16 @@ async def test_internal_token_endpoint_rejects_missing_token(client) -> None:
         json={"email": unique_email(), "password": "whatever"},
     )
     assert resp.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_password_hash_and_verify_roundtrip() -> None:
+    """§104 load-test finding: hash_password/verify_password moved onto
+    asyncio.to_thread so Argon2id's CPU-bound work stops blocking the
+    event loop — this locks in that the roundtrip is still correct.
+    """
+    from app.core.security import hash_password, verify_password
+
+    hashed = await hash_password("correct horse battery staple")
+    assert await verify_password("correct horse battery staple", hashed) is True
+    assert await verify_password("wrong password", hashed) is False

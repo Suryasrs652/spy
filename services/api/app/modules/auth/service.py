@@ -52,7 +52,7 @@ async def signup(db: AsyncSession, *, email: str, password: str, name: str | Non
     if existing is not None:
         raise ConflictError("An account with this email already exists.")
 
-    user = User(email=email, password_hash=hash_password(password))
+    user = User(email=email, password_hash=await hash_password(password))
     db.add(user)
     await db.flush()
 
@@ -127,7 +127,7 @@ async def reset_password(db: AsyncSession, *, token: str, new_password: str) -> 
     if user is None:
         raise NotFoundError("Account not found.")
 
-    user.password_hash = hash_password(new_password)
+    user.password_hash = await hash_password(new_password)
     await db.commit()
 
 
@@ -135,10 +135,10 @@ async def verify_credentials(db: AsyncSession, *, email: str, password: str) -> 
     user = await get_user_by_email(db, email)
     if user is None or not user.password_hash:
         # Constant-shape failure whether the account exists or not.
-        verify_password(password, DUMMY_PASSWORD_HASH)
+        await verify_password(password, DUMMY_PASSWORD_HASH)
         raise UnauthenticatedError("Invalid email or password.")
 
-    if not verify_password(password, user.password_hash):
+    if not await verify_password(password, user.password_hash):
         raise UnauthenticatedError("Invalid email or password.")
 
     if user.status != UserStatus.ACTIVE.value:

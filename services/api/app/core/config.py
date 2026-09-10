@@ -30,6 +30,11 @@ class Settings(BaseSettings):
     environment: str = "development"
     api_base_url: str = "http://localhost:8000"
     web_base_url: str = "http://localhost:3000"
+    # Which of the three processes docker-entrypoint.sh can start this is
+    # ("api", "worker", or "beat") — read here (not just by the shell
+    # script) because app/db/session.py needs it to pick a pooling
+    # strategy; see USE_NULL_POOL below for why.
+    run_mode: str = "api"
 
     # Database
     database_url: str = Field(
@@ -38,14 +43,33 @@ class Settings(BaseSettings):
     database_url_sync: str = Field(
         default="postgresql+psycopg://spy:spy@localhost:5432/spy"
     )
-    # Test-only: pytest-asyncio tears down and recreates the event loop
-    # between test functions, but SQLAlchemy's default async pool keeps
-    # asyncpg connections bound to whichever loop was running when they were
-    # opened — reusing one from a dead loop raises "attached to a different
-    # loop". NullPool opens a fresh physical connection per checkout and
-    # closes it on checkin, sidestepping cross-loop reuse entirely; this
-    # never applies outside the test process (conftest.py sets the env var).
+    # asyncpg connections are bound to the event loop that opened them.
+    # Reusing a pooled one from a *different, already-closed* loop raises
+    # "attached to a different loop" — pytest-asyncio's function-scoped
+    # loops hit this between test functions (conftest.py sets this env var
+    # for the whole test process), and — found via the M4 load test, not
+    # by inspection — Celery's `asyncio.run()`-per-task pattern in
+    # app/workers/tasks/crawl.py hits the exact same failure the moment one
+    # worker process handles a second task and the pool hands back a
+    # connection opened during the first task's now-dead loop. `run_mode`
+    # below forces NullPool for "worker"/"beat" unconditionally for that
+    # reason, independent of this flag; this flag exists for the test
+    # process (which runs as `run_mode="api"`) and for anyone who wants it
+    # off in the api/web process too.
     use_null_pool: bool = False
+
+    # §104 load-test finding: SQLAlchemy's un-configured default
+    # (pool_size=5, max_overflow=10 -> 15 concurrent connections per
+    # process) queues almost all of a realistic concurrent request burst
+    # behind a handful of DB connections — 300 concurrent authenticated
+    # reads measured a p99 of ~3s purely from that queuing, not slow
+    # queries. Raised, and made explicitly tunable per deployment: this
+    # process's actual ceiling is (pool_size + max_overflow) times however
+    # many processes share one Postgres (api + worker + beat here), which
+    # must stay under Postgres's own max_connections.
+    db_pool_size: int = 10
+    db_max_overflow: int = 10
+    db_pool_timeout_seconds: int = 30
 
     # Redis / queue
     redis_url: str = "redis://localhost:6379/0"
