@@ -74,6 +74,7 @@ from app.modules.auth.internal_router import router as auth_internal_router  # n
 from app.modules.auth.router import router as auth_router  # noqa: E402
 from app.modules.backlinks.router import router as backlinks_router  # noqa: E402
 from app.modules.billing.router import router as billing_router  # noqa: E402
+from app.modules.competitors.router import router as competitors_router  # noqa: E402
 from app.modules.entitlements.router import router as entitlements_router  # noqa: E402
 from app.modules.gsc.router import router as gsc_router  # noqa: E402
 from app.modules.keywords.router import router as keywords_router  # noqa: E402
@@ -95,3 +96,4 @@ app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(notifications_router, prefix=API_PREFIX)
 app.include_router(backlinks_router, prefix=API_PREFIX)
 app.include_router(keywords_router, prefix=API_PREFIX)
+app.include_router(competitors_router, prefix=API_PREFIX)

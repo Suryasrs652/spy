@@ -17,6 +17,7 @@ celery_app = Celery(
         "app.workers.tasks.reports",
         "app.workers.tasks.gsc_sync",
         "app.workers.tasks.retention",
+        "app.workers.tasks.competitors",
     ],
 )
 
@@ -34,6 +35,7 @@ celery_app.conf.update(
         "app.workers.tasks.reports.generate_report_task": {"queue": "reports"},
         "app.workers.tasks.gsc_sync.daily_gsc_sync_task": {"queue": "gsc"},
         "app.workers.tasks.retention.purge_expired_data_task": {"queue": "maintenance"},
+        "app.workers.tasks.competitors.refresh_competitor_task": {"queue": "crawl"},
     },
     task_default_queue="audit.standard",
     beat_schedule={
