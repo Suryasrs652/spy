@@ -32,6 +32,12 @@ logger = structlog.get_logger(__name__)
 
 MAX_CRAWL_DEPTH_HARD = 10
 FETCH_TIMEOUT_SECONDS = 15.0
+MAX_SCHEMA_BLOCKS_STORED = 10  # cap per page — enough for field-level checks without bloating the row
+MAX_EXTERNAL_LINKS_CHECKED = 25  # sampled, not exhaustive — bounds worst-case audit time
+SECURITY_HEADER_NAMES = (
+    "strict-transport-security", "x-content-type-options", "content-security-policy",
+    "x-frame-options", "referrer-policy", "server", "set-cookie", "permissions-policy",
+)
 
 
 class CrawlFailure(Exception):
@@ -51,6 +57,12 @@ class CrawlResult:
     links: list[PageLink] = field(default_factory=list)
     urls_discovered: int = 0
     urls_processed: int = 0
+    # Site-wide facts the rule engine can't derive from a single page (§144
+    # M2 rule expansion) — fed to run_all_rules as `site_facts`.
+    robots_txt_found: bool = False
+    robots_disallow_all: bool = False
+    sitemap_found: bool = False
+    max_urls_reached: bool = False
 
 
 def _looks_js_dependent(html: str) -> bool:
@@ -82,15 +94,24 @@ async def crawl_site(
 
     try:
         policy = await fetch_robots_policy(fetcher, origin=origin, user_agent=settings.crawler_user_agent)
+        result.robots_txt_found = policy.found
+        result.robots_disallow_all = policy.disallows_everything(origin, settings.crawler_user_agent)
 
-        seed_urls: list[str] = [origin + "/"]
+        sitemap_url_set: set[str] = set()
         try:
             sitemap_urls = await discover_sitemap_urls(
                 fetcher, origin=origin, robots_sitemaps=policy.sitemap_urls, max_urls=max_urls
             )
-            seed_urls.extend(sitemap_urls)
+            for u in sitemap_urls:
+                try:
+                    sitemap_url_set.add(normalize_url(u))
+                except Exception:  # noqa: BLE001
+                    continue
         except Exception:  # noqa: BLE001 - sitemap discovery is best-effort
             logger.warning("sitemap_discovery_failed", audit_id=str(audit_id))
+        result.sitemap_found = len(sitemap_url_set) > 0
+
+        seed_urls: list[str] = [origin + "/", *sitemap_url_set]
 
         frontier: list[tuple[str, int]] = []
         seen_frontier: set[str] = set()
@@ -138,6 +159,7 @@ async def crawl_site(
                 page.audit_id = audit_id
                 page.project_id = project_id
                 page.crawl_depth = depth
+                page.from_sitemap = url in sitemap_url_set
                 result.pages.append(page)
                 page_id_by_url[url] = page.id
                 result.urls_processed += 1
@@ -163,7 +185,17 @@ async def crawl_site(
         if result.urls_processed == 0:
             raise CrawlFailure("NO_CRAWLABLE_HTML", "TARGET_ERROR", "No crawlable HTML page was discovered.")
 
+        result.max_urls_reached = len(visited) >= max_urls
+
         status_by_url = {p.url: p.status_code for p in result.pages}
+
+        # §23 Links "broken links" — sample a bounded set of *external*
+        # targets and actually check them (internal targets are already
+        # known from the crawl itself). Bounded so one audit can't balloon
+        # into checking thousands of external URLs.
+        external_targets = {t for _s, t, link in pending_links if not link.is_internal}
+        external_status = await _check_external_links(fetcher, external_targets)
+
         for source_url, target_url, link in pending_links:
             result.links.append(
                 PageLink(
@@ -176,17 +208,38 @@ async def crawl_site(
                     nofollow=link.nofollow,
                     ugc=link.ugc,
                     sponsored=link.sponsored,
-                    # Only known when the target was itself crawled this run
-                    # (e.g. another internal page); an external or
-                    # not-yet-visited target stays None (undetermined),
-                    # rather than a possibly-stale guess.
-                    status_code=status_by_url.get(target_url),
+                    # Known when the target was crawled internally this run,
+                    # or was one of the sampled external checks; otherwise
+                    # stays None (undetermined) rather than a stale guess.
+                    status_code=status_by_url.get(target_url) or external_status.get(target_url),
                 )
             )
 
         return result
     finally:
         await fetcher.aclose()
+
+
+async def _check_external_links(fetcher: SafeFetcher, targets: set[str]) -> dict[str, int]:
+    """Best-effort status check for a bounded sample of external link
+    targets (§23 "broken links" isn't only about internal ones). Every
+    fetch still goes through the same SSRF-guarded `SafeFetcher` — an
+    external link that itself resolves to a private address is correctly
+    rejected, not silently skipped.
+    """
+    sample = list(targets)[:MAX_EXTERNAL_LINKS_CHECKED]
+    if not sample:
+        return {}
+
+    async def _check_one(url: str) -> tuple[str, int | None]:
+        try:
+            result = await asyncio.wait_for(fetcher.fetch(url), timeout=8.0)
+            return url, result.response.status_code
+        except Exception:  # noqa: BLE001 - unreachable/blocked/timed-out external link => undetermined
+            return url, None
+
+    outcomes = await asyncio.gather(*[_check_one(u) for u in sample])
+    return {url: status for url, status in outcomes if status is not None}
 
 
 async def _fetch_and_parse(fetcher, url, depth, origin, policy, user_agent):
@@ -205,6 +258,9 @@ async def _fetch_and_parse(fetcher, url, depth, origin, policy, user_agent):
     content_type = response.headers.get("content-type", "")
     is_html = "text/html" in content_type or content_type == ""
 
+    chain = [*fetch_result.redirect_chain, fetch_result.final_url]
+    is_loop = len(set(chain)) < len(chain)
+
     page = CrawlPage(
         id=uuid.uuid4(),
         url=url,
@@ -215,6 +271,10 @@ async def _fetch_and_parse(fetcher, url, depth, origin, policy, user_agent):
         response_ms=elapsed_ms,
         html_size=len(response.content),
         crawl_depth=depth,
+        redirect_count=len(fetch_result.redirect_chain),
+        is_redirect_loop=is_loop,
+        x_robots_tag=response.headers.get("x-robots-tag"),
+        security_headers=_extract_security_headers(response.headers),
     )
 
     if not is_html or response.status_code >= 400:
@@ -231,23 +291,48 @@ async def _fetch_and_parse(fetcher, url, depth, origin, policy, user_agent):
     page.meta_description = parsed.meta_description
     page.h1 = parsed.h1
     page.h1_count = parsed.h1_count
+    page.h2_count = parsed.h2_count
+    page.h3_count = parsed.h3_count
+    page.heading_order_valid = parsed.heading_order_valid
     page.canonical_url = parsed.canonical_url
     page.robots_meta = parsed.robots_meta
     page.word_count = parsed.word_count
     page.content_hash = parsed.content_hash
     page.html_hash = parsed.html_hash
-    page.redirect_count = len(fetch_result.redirect_chain)
     page.images_total = parsed.images_total
     page.images_missing_alt = parsed.images_missing_alt
+    page.images_missing_dimensions = parsed.images_missing_dimensions
+    page.images_generic_alt = parsed.images_generic_alt
     page.has_schema = len(parsed.schema_blocks) > 0
     page.schema_types = _extract_schema_types(parsed.schema_blocks)
+    page.schema_blocks = parsed.schema_blocks[:MAX_SCHEMA_BLOCKS_STORED]
     page.schema_invalid = len(parsed.schema_errors) > 0
     page.mixed_content = parsed.mixed_content
+    page.has_og_title = parsed.has_og_title
+    page.has_og_description = parsed.has_og_description
+    page.has_og_image = parsed.has_og_image
+    page.has_twitter_card = parsed.has_twitter_card
+    page.has_viewport_meta = parsed.has_viewport_meta
+    page.has_charset_meta = parsed.has_charset_meta
+    page.has_favicon = parsed.has_favicon
+    page.html_lang = parsed.html_lang
+    page.hreflang_tags = [{"lang": t.lang, "url": t.url} for t in parsed.hreflang_tags]
+    page.has_insecure_form_action = parsed.has_insecure_form_action
+    page.word_frequency_top_ratio = parsed.word_frequency_top_ratio
 
     robots_meta_lower = (parsed.robots_meta or "").lower()
-    page.indexable = "noindex" not in robots_meta_lower and response.status_code < 400
+    x_robots_lower = (page.x_robots_tag or "").lower()
+    page.indexable = (
+        "noindex" not in robots_meta_lower
+        and "noindex" not in x_robots_lower
+        and response.status_code < 400
+    )
 
     return page, parsed, parsed.links
+
+
+def _extract_security_headers(headers) -> dict:
+    return {name: headers[name] for name in SECURITY_HEADER_NAMES if name in headers}
 
 
 def _extract_schema_types(schema_blocks: list[dict]) -> list[str]:

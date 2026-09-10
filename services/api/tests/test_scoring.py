@@ -20,11 +20,29 @@ def _page(**kwargs) -> CrawlPage:
         url=url, normalized_url=url,
         status_code=200, content_type="text/html", title="Example Page",
         meta_description="A perfectly fine description of this page for testing purposes here.",
-        h1="Example", h1_count=1, canonical_url=url, robots_meta=None,
+        h1="Example Heading", h1_count=1, canonical_url=url, robots_meta=None,
         word_count=500, content_hash=uuid.uuid4().hex, html_hash=uuid.uuid4().hex,
         crawl_depth=0, indexable=True, robots_allowed=True, response_ms=200, html_size=10000,
         redirect_count=0, images_total=0, images_missing_alt=0,
-        has_schema=True, schema_types=["Organization"], schema_invalid=False, mixed_content=False,
+        has_schema=True, schema_types=["Organization", "WebSite"], schema_invalid=False, mixed_content=False,
+        # M2 fields — defaulted to a "clean" page's values. CrawlPage is a
+        # SQLAlchemy model whose column `default=` only applies at INSERT
+        # time, not on plain Python construction, so every field a rule
+        # might read must be set explicitly here or it's None in tests.
+        h2_count=2, h3_count=0, heading_order_valid=True,
+        has_og_title=True, has_og_description=True, has_og_image=True, has_twitter_card=True,
+        has_viewport_meta=True, has_charset_meta=True, has_favicon=True,
+        html_lang="en", hreflang_tags=[],
+        images_missing_dimensions=0, images_generic_alt=0,
+        has_insecure_form_action=False, word_frequency_top_ratio=0.02,
+        from_sitemap=True, x_robots_tag=None,
+        security_headers={
+            "strict-transport-security": "max-age=31536000", "x-content-type-options": "nosniff",
+            "content-security-policy": "default-src 'self'", "x-frame-options": "DENY",
+            "referrer-policy": "strict-origin-when-cross-origin", "permissions-policy": "geolocation=()",
+        },
+        schema_blocks=[{"@type": "Organization", "name": "Example Co", "url": "https://example.com"}],
+        is_redirect_loop=False,
     )
     defaults.update(kwargs)
     return CrawlPage(**defaults)

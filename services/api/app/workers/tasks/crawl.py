@@ -20,6 +20,7 @@ from sqlalchemy import select
 from app.core.errors import BlockedTargetError
 from app.db.base import utcnow
 from app.db.session import AsyncSessionLocal
+from app.modules.admin.models import RuleConfig
 from app.modules.audits.models import Audit, AuditJob, AuditStatus, FailureCategory, FailureCode
 from app.modules.crawler.engine import CrawlFailure, crawl_site
 from app.modules.entitlements.service import consume_entitlement_for_audit, release_entitlement_for_audit
@@ -33,6 +34,19 @@ from app.modules.seo.rules import run_all_rules
 from app.workers.celery_app import celery_app
 
 logger = structlog.get_logger(__name__)
+
+
+async def _load_active_rule_config(db) -> dict:
+    """§131 — versioned thresholds live in the DB (seeded by migration
+    0002), not hardcoded; DEFAULT_THRESHOLDS in rules/base.py is only the
+    fallback for any key the active DB row doesn't (yet) override.
+    """
+    row = (
+        await db.execute(
+            select(RuleConfig).where(RuleConfig.key == "thresholds", RuleConfig.active.is_(True))
+        )
+    ).scalars().first()
+    return dict(row.value) if row else {}
 
 
 async def _set_status(db, audit: Audit, job: AuditJob, status: str, **job_fields) -> None:
@@ -88,7 +102,17 @@ async def _run_audit_async(audit_id: str) -> None:
                 db, audit, job, AuditStatus.ANALYZING.value,
                 urls_processed=result.urls_processed, urls_discovered=result.urls_discovered, progress=100,
             )
-            findings = run_all_rules(result.pages, result.links)
+            rule_config = await _load_active_rule_config(db)
+            findings = run_all_rules(
+                result.pages, result.links,
+                rule_config=rule_config,
+                site_facts={
+                    "robots_txt_found": result.robots_txt_found,
+                    "robots_disallow_all": result.robots_disallow_all,
+                    "sitemap_found": result.sitemap_found,
+                    "max_urls_reached": result.max_urls_reached,
+                },
+            )
 
             for finding in findings:
                 issue = AuditIssue(

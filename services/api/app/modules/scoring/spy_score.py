@@ -38,7 +38,7 @@ COMPONENT_WEIGHTS = {
 
 _SEVERITY_DEDUCTION = {"CRITICAL": 25, "HIGH": 15, "MEDIUM": 8, "LOW": 3, "INFO": 0}
 
-_TECHNICAL_CATEGORIES = {"Crawlability", "Indexability", "Security"}
+_TECHNICAL_CATEGORIES = {"Crawlability", "Indexability", "Security", "International"}
 _ONPAGE_CATEGORIES = {"Metadata", "Images", "Structured Data"}
 _CONTENT_CATEGORIES = {"Content"}
 _ARCHITECTURE_CATEGORIES = {"Links"}

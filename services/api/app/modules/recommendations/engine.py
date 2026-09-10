@@ -20,6 +20,7 @@ _SEVERITY_IMPACT = {"CRITICAL": 10, "HIGH": 8, "MEDIUM": 5, "LOW": 3, "INFO": 1}
 _CATEGORY_EFFORT = {
     "Crawlability": 6, "Indexability": 4, "Metadata": 2, "Content": 7,
     "Links": 4, "Images": 2, "Structured Data": 5, "Security": 6,
+    "International": 5,
 }
 
 _MAX_RAW_PRIORITY = 10 * 10 * 1.0  # impact(10) * confidence(10) / effort(1)

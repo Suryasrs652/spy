@@ -18,11 +18,23 @@ class RobotsPolicy:
     parser: Protego | None
     sitemap_urls: list[str]
     crawl_delay: float | None
+    found: bool = False
 
     def is_allowed(self, url: str, user_agent: str) -> bool:
         if self.parser is None:
             return True
         return self.parser.can_fetch(url, user_agent)
+
+    def disallows_everything(self, origin: str, user_agent: str) -> bool:
+        """A blanket `Disallow: /` — detected by checking both the root and
+        an arbitrary, certainly-nonexistent path: if a made-up path is also
+        blocked, that's a site-wide block rather than a rule targeting a
+        real, specific path.
+        """
+        if self.parser is None:
+            return False
+        probe = origin.rstrip("/") + "/__spy_disallow_probe_3f9a2b__"
+        return not self.is_allowed(origin + "/", user_agent) and not self.is_allowed(probe, user_agent)
 
 
 async def fetch_robots_policy(fetcher: SafeFetcher, *, origin: str, user_agent: str) -> RobotsPolicy:
@@ -30,17 +42,17 @@ async def fetch_robots_policy(fetcher: SafeFetcher, *, origin: str, user_agent: 
     try:
         result = await fetcher.fetch(robots_url)
     except Exception:  # noqa: BLE001 - unreachable robots.txt => treat as "allow all"
-        return RobotsPolicy(parser=None, sitemap_urls=[], crawl_delay=None)
+        return RobotsPolicy(parser=None, sitemap_urls=[], crawl_delay=None, found=False)
 
     if result.response.status_code >= 400:
-        return RobotsPolicy(parser=None, sitemap_urls=[], crawl_delay=None)
+        return RobotsPolicy(parser=None, sitemap_urls=[], crawl_delay=None, found=False)
 
     body = result.response.text
     parser = Protego.parse(body)
     sitemaps = list(parser.sitemaps) if parser.sitemaps else []
     delay = parser.crawl_delay(user_agent)
 
-    return RobotsPolicy(parser=parser, sitemap_urls=sitemaps, crawl_delay=delay)
+    return RobotsPolicy(parser=parser, sitemap_urls=sitemaps, crawl_delay=delay, found=True)
 
 
 async def discover_sitemap_urls(

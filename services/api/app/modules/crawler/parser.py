@@ -17,6 +17,14 @@ from app.modules.crawler.normalize import normalize_url
 
 _WHITESPACE_RE = re.compile(r"\s+")
 
+# Alt text that carries no real information — usually the filename or a
+# CMS/theme default left in place, not a description of the image (§23
+# Images: "non-descriptive alt text").
+_GENERIC_ALT_RE = re.compile(
+    r"^(image|img|photo|picture|untitled|dsc[_-]?\d+|screenshot|icon)?[\s_-]*\d*\.?(jpe?g|png|gif|webp|svg)?$",
+    re.I,
+)
+
 
 @dataclass
 class ExtractedLink:
@@ -29,11 +37,20 @@ class ExtractedLink:
 
 
 @dataclass
+class HreflangTag:
+    lang: str
+    url: str
+
+
+@dataclass
 class ParsedPage:
     title: str | None = None
     meta_description: str | None = None
     h1: str | None = None
     h1_count: int = 0
+    h2_count: int = 0
+    h3_count: int = 0
+    heading_order_valid: bool = True
     canonical_url: str | None = None
     robots_meta: str | None = None
     word_count: int = 0
@@ -42,10 +59,23 @@ class ParsedPage:
     schema_blocks: list[dict] = field(default_factory=list)
     schema_errors: list[str] = field(default_factory=list)
     images_missing_alt: int = 0
+    images_missing_dimensions: int = 0
+    images_generic_alt: int = 0
     images_total: int = 0
     links: list[ExtractedLink] = field(default_factory=list)
     heading_sequence: list[str] = field(default_factory=list)
     mixed_content: bool = False
+    has_og_title: bool = False
+    has_og_description: bool = False
+    has_og_image: bool = False
+    has_twitter_card: bool = False
+    has_viewport_meta: bool = False
+    has_charset_meta: bool = False
+    has_favicon: bool = False
+    html_lang: str | None = None
+    hreflang_tags: list[HreflangTag] = field(default_factory=list)
+    has_insecure_form_action: bool = False
+    word_frequency_top_ratio: float = 0.0
 
 
 def _clean_text(text: str | None) -> str | None:
@@ -67,10 +97,7 @@ def parse_html(*, page_url: str, html: str, base_origin: str) -> ParsedPage:
     meta_desc = soup.find("meta", attrs={"name": re.compile("^description$", re.I)})
     result.meta_description = _clean_text(meta_desc.get("content") if meta_desc else None)
 
-    h1_tags = soup.find_all("h1")
-    result.h1_count = len(h1_tags)
-    result.h1 = _clean_text(h1_tags[0].get_text()) if h1_tags else None
-    result.heading_sequence = [tag.name for tag in soup.find_all(re.compile(r"^h[1-6]$"))]
+    _extract_headings(soup, result)
 
     canonical_tag = soup.find("link", attrs={"rel": re.compile("canonical", re.I)})
     if canonical_tag and canonical_tag.get("href"):
@@ -79,25 +106,128 @@ def parse_html(*, page_url: str, html: str, base_origin: str) -> ParsedPage:
     robots_tag = soup.find("meta", attrs={"name": re.compile("^robots$", re.I)})
     result.robots_meta = _clean_text(robots_tag.get("content") if robots_tag else None)
 
-    # Visible text word count (drop script/style/noscript content).
+    _extract_social_tags(soup, result)
+    _extract_page_setup_tags(soup, page_url, result)
+    _extract_hreflang(soup, page_url, result)
+
+    html_el = soup.find("html")
+    if html_el and html_el.get("lang"):
+        result.html_lang = html_el["lang"].strip() or None
+
+    # Visible text word count (drop script/style/noscript content) — do this
+    # AFTER the tag-based extraction above since it destructively removes
+    # <script>/<style> nodes.
     for tag in soup(["script", "style", "noscript", "template"]):
         tag.decompose()
     body_text = soup.get_text(separator=" ")
     words = [w for w in _WHITESPACE_RE.split(body_text) if w]
     result.word_count = len(words)
     result.content_hash = hashlib.sha256(" ".join(words).lower().encode("utf-8")).hexdigest()
+    result.word_frequency_top_ratio = _top_word_ratio(words)
 
+    _extract_images(soup, result)
+    _extract_schema(soup, result)
+    result.links = _extract_links(soup, page_url=page_url, base_origin=base_origin)
+    result.mixed_content = _has_mixed_content(soup, page_url)
+    result.has_insecure_form_action = _has_insecure_form_action(soup, page_url)
+
+    return result
+
+
+def _extract_headings(soup: BeautifulSoup, result: ParsedPage) -> None:
+    h1_tags = soup.find_all("h1")
+    result.h1_count = len(h1_tags)
+    result.h1 = _clean_text(h1_tags[0].get_text()) if h1_tags else None
+    result.h2_count = len(soup.find_all("h2"))
+    result.h3_count = len(soup.find_all("h3"))
+
+    sequence = [tag.name for tag in soup.find_all(re.compile(r"^h[1-6]$"))]
+    result.heading_sequence = sequence
+
+    # A heading hierarchy is "valid" if it never jumps down more than one
+    # level at a time (e.g. H2 -> H4 with no H3 in between is a skip).
+    valid = True
+    last_level = 0
+    for tag_name in sequence:
+        level = int(tag_name[1])
+        if last_level and level > last_level + 1:
+            valid = False
+            break
+        last_level = level
+    result.heading_order_valid = valid
+
+
+def _extract_social_tags(soup: BeautifulSoup, result: ParsedPage) -> None:
+    def has_meta_property(prop: str) -> bool:
+        tag = soup.find("meta", attrs={"property": prop})
+        return bool(tag and tag.get("content", "").strip())
+
+    result.has_og_title = has_meta_property("og:title")
+    result.has_og_description = has_meta_property("og:description")
+    result.has_og_image = has_meta_property("og:image")
+
+    twitter_card = soup.find("meta", attrs={"name": re.compile("^twitter:card$", re.I)})
+    result.has_twitter_card = bool(twitter_card and twitter_card.get("content", "").strip())
+
+
+def _extract_page_setup_tags(soup: BeautifulSoup, page_url: str, result: ParsedPage) -> None:
+    viewport = soup.find("meta", attrs={"name": re.compile("^viewport$", re.I)})
+    result.has_viewport_meta = bool(viewport and viewport.get("content", "").strip())
+
+    charset_meta = soup.find("meta", attrs={"charset": True})
+    charset_http_equiv = soup.find(
+        "meta", attrs={"http-equiv": re.compile("^content-type$", re.I)}
+    )
+    result.has_charset_meta = bool(charset_meta or charset_http_equiv)
+
+    for rel_value in ("icon", "shortcut icon", "apple-touch-icon"):
+        if soup.find("link", attrs={"rel": re.compile(f"^{re.escape(rel_value)}$", re.I)}):
+            result.has_favicon = True
+            break
+
+
+def _extract_hreflang(soup: BeautifulSoup, page_url: str, result: ParsedPage) -> None:
+    for tag in soup.find_all("link", attrs={"rel": re.compile("^alternate$", re.I)}):
+        lang = tag.get("hreflang")
+        href = tag.get("href")
+        if not lang or not href:
+            continue
+        try:
+            absolute = normalize_url(urljoin(page_url, href))
+        except Exception:  # noqa: BLE001
+            continue
+        result.hreflang_tags.append(HreflangTag(lang=lang.strip(), url=absolute))
+
+
+def _extract_images(soup: BeautifulSoup, result: ParsedPage) -> None:
     for img in soup.find_all("img"):
         result.images_total += 1
         alt = img.get("alt")
         if alt is None or not alt.strip():
             result.images_missing_alt += 1
+        elif _GENERIC_ALT_RE.match(alt.strip()):
+            result.images_generic_alt += 1
 
-    _extract_schema(soup, result)
-    result.links = _extract_links(soup, page_url=page_url, base_origin=base_origin)
-    result.mixed_content = _has_mixed_content(soup, page_url)
+        if not (img.get("width") and img.get("height")):
+            result.images_missing_dimensions += 1
 
-    return result
+
+def _top_word_ratio(words: list[str]) -> float:
+    """Fraction of all words that are the single most-repeated word — a
+    crude, purely-statistical proxy for keyword stuffing (§23 Content)
+    that needs no NLP: a normal page's most common word (excluding nothing,
+    stopwords included) rarely exceeds a few percent of total words; a
+    stuffed page spikes noticeably.
+    """
+    if len(words) < 20:
+        return 0.0
+    from collections import Counter
+
+    counts = Counter(w.lower() for w in words if len(w) > 2)
+    if not counts:
+        return 0.0
+    _, top_count = counts.most_common(1)[0]
+    return round(top_count / len(words), 4)
 
 
 def _has_mixed_content(soup: BeautifulSoup, page_url: str) -> bool:
@@ -112,6 +242,16 @@ def _has_mixed_content(soup: BeautifulSoup, page_url: str) -> bool:
             value = el.get(attr, "")
             if value.lower().startswith("http://"):
                 return True
+    return False
+
+
+def _has_insecure_form_action(soup: BeautifulSoup, page_url: str) -> bool:
+    if not page_url.lower().startswith("https://"):
+        return False
+    for form in soup.find_all("form"):
+        action = form.get("action", "")
+        if action.lower().startswith("http://"):
+            return True
     return False
 
 
