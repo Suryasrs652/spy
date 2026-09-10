@@ -16,3 +16,22 @@ class GscPropertyOut(BaseModel):
     site_url: str
     permission_level: str
     selected: bool
+
+
+class GscSelectPropertyRequest(BaseModel):
+    project_id: uuid.UUID | None = None
+
+
+class GscSyncResultOut(BaseModel):
+    synced: int
+    failed: int
+    total: int
+
+
+class GscQueryRowOut(BaseModel):
+    query: str | None = None
+    page: str | None = None
+    clicks: int
+    impressions: int
+    ctr: float
+    position: float

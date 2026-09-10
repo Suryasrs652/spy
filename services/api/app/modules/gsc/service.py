@@ -22,7 +22,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
-from app.core.errors import ValidationAppError
+from app.core.errors import NotFoundError, ValidationAppError
 from app.core.security import decrypt_secret, encrypt_secret, issue_jwt, decode_jwt
 from app.db.base import utcnow
 from app.modules.gsc.models import GscConnection, GscConnectionStatus, GscProperty
@@ -161,6 +161,37 @@ async def list_properties(db: AsyncSession, *, organization_id: uuid.UUID) -> li
         return []
     result = await db.execute(select(GscProperty).where(GscProperty.connection_id == connection.id))
     return list(result.scalars().all())
+
+
+async def get_property_for_org(
+    db: AsyncSession, *, organization_id: uuid.UUID, property_id: uuid.UUID
+) -> GscProperty:
+    """Tenant-scoped lookup (§86/§122): joins through the owning connection
+    so a property_id belonging to a different organization 404s rather than
+    leaking existence."""
+    result = await db.execute(
+        select(GscProperty)
+        .join(GscConnection, GscConnection.id == GscProperty.connection_id)
+        .where(GscProperty.id == property_id, GscConnection.organization_id == organization_id)
+    )
+    prop = result.scalar_one_or_none()
+    if prop is None:
+        raise NotFoundError("Search Console property not found.")
+    return prop
+
+
+async def select_property(
+    db: AsyncSession, *, organization_id: uuid.UUID, property_id: uuid.UUID, project_id: uuid.UUID | None
+) -> GscProperty:
+    """§31 'user selects property' — marks a discovered GSC property as the
+    one to sync data for, optionally linking it to a Spy project."""
+    prop = await get_property_for_org(db, organization_id=organization_id, property_id=property_id)
+    prop.selected = True
+    if project_id is not None:
+        prop.project_id = project_id
+    await db.commit()
+    await db.refresh(prop)
+    return prop
 
 
 def _decrypt_refresh_token(connection: GscConnection) -> str:

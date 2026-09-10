@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from celery import Celery
+from celery.schedules import crontab
 
 from app.core.config import get_settings
 
@@ -14,6 +15,7 @@ celery_app = Celery(
     include=[
         "app.workers.tasks.crawl",
         "app.workers.tasks.reports",
+        "app.workers.tasks.gsc_sync",
     ],
 )
 
@@ -29,6 +31,16 @@ celery_app.conf.update(
     task_routes={
         "app.workers.tasks.crawl.run_audit_task": {"queue": "audit.standard"},
         "app.workers.tasks.reports.generate_report_task": {"queue": "reports"},
+        "app.workers.tasks.gsc_sync.daily_gsc_sync_task": {"queue": "gsc"},
     },
     task_default_queue="audit.standard",
+    # §33 "1-day incremental pulls" — run once daily, well after Google's
+    # own data settles (GSC_DATA_LAG_DAYS in sync_service.py already backs
+    # off the sync window itself; this just picks a quiet hour to run).
+    beat_schedule={
+        "daily-gsc-sync": {
+            "task": "app.workers.tasks.gsc_sync.daily_gsc_sync_task",
+            "schedule": crontab(hour=3, minute=0),
+        },
+    },
 )
