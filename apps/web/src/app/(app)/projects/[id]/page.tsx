@@ -29,6 +29,12 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
         <RunAuditButton projectId={project.id} canRun={!!entitlement?.can_run} reason={entitlement?.reason ?? null} />
       </div>
 
+      <div className="flex gap-4 mt-6 text-sm">
+        <Link href={`/projects/${project.id}/backlinks`} className="text-accent hover:underline">Backlinks</Link>
+        <Link href={`/projects/${project.id}/rank-tracker`} className="text-accent hover:underline">Rank Tracker</Link>
+        <Link href={`/projects/${project.id}/competitors`} className="text-accent hover:underline">Competitors</Link>
+      </div>
+
       <h2 className="text-lg font-semibold mt-10 mb-4">Audit History</h2>
       {!audits ? (
         <div className="card p-6 text-muted text-sm">Couldn't load audits.</div>

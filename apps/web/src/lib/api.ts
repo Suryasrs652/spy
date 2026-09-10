@@ -193,3 +193,78 @@ export interface Plan {
   project_limit: number | null;
   member_limit: number | null;
 }
+
+export interface BacklinkSummary {
+  domain: string;
+  total_backlinks: number;
+  referring_domains: number;
+  followed_backlinks: number;
+}
+
+export interface Backlink {
+  id: string;
+  source_url: string;
+  source_domain: string;
+  target_url: string;
+  anchor_text: string | null;
+  nofollow: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface RankOverviewRow {
+  id: string;
+  keyword: string;
+  added_at: string;
+  has_data: boolean;
+  current_position: number | null;
+  best_position: number | null;
+}
+
+export interface RankHistoryPoint {
+  date: string;
+  position: number;
+  clicks: number;
+  impressions: number;
+}
+
+export interface RankHistory {
+  keyword: string;
+  has_data: boolean;
+  reason: string | null;
+  current_position: number | null;
+  best_position: number | null;
+  history: RankHistoryPoint[];
+}
+
+export interface Competitor {
+  id: string;
+  name: string;
+  domain: string;
+  status: "PENDING" | "CRAWLING" | "COMPLETED" | "FAILED";
+  last_crawled_at: string | null;
+  failure_message: string | null;
+  spy_score: number | null;
+  technical_score: number | null;
+  seo_score: number | null;
+  content_score: number | null;
+  performance_score: number | null;
+  aeo_score: number | null;
+  geo_score: number | null;
+  created_at: string;
+}
+
+export interface CompetitorComparison {
+  competitor: Competitor;
+  your_latest_audit_id: string | null;
+  comparisons: { field: string; your_score: number | null; competitor_score: number | null; delta: number | null }[];
+}
+
+export interface ContentGap {
+  has_data: boolean;
+  reason: string | null;
+  your_terms: string[];
+  competitor_terms: string[];
+  gap_terms: string[];
+  methodology: string | null;
+}

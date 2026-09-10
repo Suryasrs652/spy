@@ -8,9 +8,11 @@ const NAV_LIVE = [
   { href: "/projects", label: "Projects" },
 ];
 
+// Backlinks/Competitors/Rank Tracker shipped in M5, but are project-scoped
+// (no single global URL to link to from here) — reached from a project's
+// own detail page instead, not listed as a top-level nav item.
 const NAV_SOON = [
-  "Site Explorer", "Keywords", "Backlinks", "Competitors", "Rank Tracker",
-  "Content Explorer", "Search Console", "AEO", "GEO", "Reports",
+  "Site Explorer", "Keywords", "Content Explorer", "Search Console", "AEO", "GEO", "Reports",
 ];
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
