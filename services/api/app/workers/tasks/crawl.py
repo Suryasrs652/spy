@@ -22,8 +22,10 @@ from app.db.base import utcnow
 from app.db.session import AsyncSessionLocal
 from app.modules.admin.models import RuleConfig
 from app.modules.audits.models import Audit, AuditJob, AuditStatus, FailureCategory, FailureCode
+from app.modules.auth.models import User
 from app.modules.crawler.engine import CrawlFailure, crawl_site
 from app.modules.entitlements.service import consume_entitlement_for_audit, release_entitlement_for_audit
+from app.modules.notifications.service import notify_audit_completed, notify_audit_failed
 from app.modules.projects.models import Project
 from app.modules.recommendations.engine import build_recommendations
 from app.modules.recommendations.models import Recommendation
@@ -168,6 +170,10 @@ async def _run_audit_async(audit_id: str) -> None:
             await db.commit()
             logger.info("audit_completed", audit_id=audit_id, spy_score=audit.spy_score)
 
+            requester = (await db.execute(select(User).where(User.id == audit.requested_by))).scalar_one_or_none()
+            if requester is not None:
+                await notify_audit_completed(db, audit=audit, requester_email=requester.email)
+
         except CrawlFailure as exc:
             await _fail_audit(db, audit, job, category=exc.category, code=exc.code, message=exc.message)
         except BlockedTargetError as exc:
@@ -198,6 +204,10 @@ async def _fail_audit(db, audit: Audit, job: AuditJob, *, category: str, code: s
     await release_entitlement_for_audit(db, audit)
     await db.commit()
     logger.warning("audit_failed", audit_id=str(audit.id), category=category, code=code)
+
+    requester = (await db.execute(select(User).where(User.id == audit.requested_by))).scalar_one_or_none()
+    if requester is not None:
+        await notify_audit_failed(db, audit=audit, requester_email=requester.email)
 
 
 @celery_app.task(name="app.workers.tasks.crawl.run_audit_task", bind=True, max_retries=0)

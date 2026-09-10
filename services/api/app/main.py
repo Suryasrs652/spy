@@ -70,6 +70,7 @@ from app.modules.auth.router import router as auth_router  # noqa: E402
 from app.modules.billing.router import router as billing_router  # noqa: E402
 from app.modules.entitlements.router import router as entitlements_router  # noqa: E402
 from app.modules.gsc.router import router as gsc_router  # noqa: E402
+from app.modules.notifications.router import router as notifications_router  # noqa: E402
 from app.modules.organizations.router import router as organizations_router  # noqa: E402
 from app.modules.projects.router import router as projects_router  # noqa: E402
 from app.modules.reports.router import router as reports_router  # noqa: E402
@@ -84,3 +85,4 @@ app.include_router(reports_router, prefix=API_PREFIX)
 app.include_router(billing_router, prefix=API_PREFIX)
 app.include_router(gsc_router, prefix=API_PREFIX)
 app.include_router(admin_router, prefix=API_PREFIX)
+app.include_router(notifications_router, prefix=API_PREFIX)

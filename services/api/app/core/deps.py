@@ -90,3 +90,18 @@ def require_role(*allowed: OrgRole):
         return ctx
 
     return _dep
+
+
+async def require_super_admin(user: User = Depends(get_current_user)) -> User:
+    """§128/§129 — a real, session-based platform-admin gate: the caller
+    must hold a normal access token (same as any other endpoint) *and* have
+    `is_super_admin` set on their user row. Replaces M1's placeholder
+    shared-internal-token check, which only proved the admin surface was
+    unreachable from a browser — not that it was actually authenticated as
+    a specific admin (so nothing here was auditable to a person).
+    """
+    if not user.is_super_admin:
+        # Same 403 whether the flag is unset or the caller isn't an admin at
+        # all — no distinct signal that would help someone probe for the flag.
+        raise ForbiddenError("Admin access required.")
+    return user

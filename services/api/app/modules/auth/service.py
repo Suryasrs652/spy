@@ -35,6 +35,11 @@ from app.modules.organizations.service import (
     list_user_organizations,
 )
 
+# §109 — a real (non-routable) TLD, never valid to send mail to, so an
+# anonymized row can never accidentally collide with or reactivate as a
+# real address later.
+_DELETED_EMAIL_DOMAIN = "deleted.invalid"
+
 
 async def get_user_by_email(db: AsyncSession, email: str) -> User | None:
     result = await db.execute(select(User).where(User.email == email.lower()))
@@ -180,3 +185,58 @@ async def default_organization_id(db: AsyncSession, user_id: uuid.UUID) -> uuid.
     if not orgs:
         raise NotFoundError("No organization found for this user.")
     return orgs[0].id
+
+
+async def delete_own_account(db: AsyncSession, *, user: User) -> None:
+    """§109 self-service account deletion.
+
+    The user row is never hard-deleted — `Audit.requested_by` and several
+    other tables reference it with no ON DELETE CASCADE (deliberately: an
+    audit's history must survive the requester's account), so a hard delete
+    would fail a foreign-key constraint anyway. Instead this anonymizes the
+    row (Argon2id hash dropped, email replaced with a non-routable
+    placeholder, OAuth link dropped) and flips status to DELETED, which
+    `verify_credentials`/`get_current_user` already treat as unusable.
+
+    Blocked when the user is the OWNER of an organization that has other
+    members — deleting them would silently strand those teammates with no
+    owner. They must transfer ownership or remove the other members first.
+    """
+    from sqlalchemy import func, select
+
+    from app.modules.billing.models import Subscription, SubscriptionStatus
+    from app.modules.organizations.models import OrganizationMember
+
+    owned_orgs = [
+        org for org in await list_user_organizations(db, user.id)
+        if org.owner_user_id == user.id
+    ]
+    for org in owned_orgs:
+        member_count = (
+            await db.execute(
+                select(func.count()).select_from(OrganizationMember).where(
+                    OrganizationMember.organization_id == org.id
+                )
+            )
+        ).scalar_one()
+        if member_count > 1:
+            raise ConflictError(
+                "You own a workspace with other members. Transfer ownership or remove the other "
+                "members before deleting your account."
+            )
+
+    for org in owned_orgs:
+        result = await db.execute(
+            select(Subscription).where(
+                Subscription.organization_id == org.id, Subscription.status == SubscriptionStatus.ACTIVE.value
+            )
+        )
+        for sub in result.scalars().all():
+            sub.status = SubscriptionStatus.CANCELLED.value
+            sub.cancel_at_period_end = False
+
+    user.email = f"deleted-{user.id.hex}@{_DELETED_EMAIL_DOMAIN}"
+    user.password_hash = None
+    user.google_sub = None
+    user.status = UserStatus.DELETED.value
+    await db.commit()

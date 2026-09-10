@@ -90,3 +90,35 @@ class RecommendationOut(BaseModel):
     priority_score: float
     status: str
     group: str
+
+
+class ScoreDeltaOut(BaseModel):
+    baseline: float | None
+    current: float | None
+    delta: float | None
+
+
+class IssueSummaryOut(BaseModel):
+    rule_id: str
+    category: str
+    severity: str
+    title: str
+    affected_count: int
+
+
+class AuditComparisonOut(BaseModel):
+    """§133 — a diff between two COMPLETED audits of the same project,
+    always oriented chronologically (`baseline` is the earlier of the two
+    audit ids passed in, regardless of which one the caller names first).
+    """
+
+    baseline_audit_id: uuid.UUID
+    current_audit_id: uuid.UUID
+    baseline_created_at: datetime
+    current_created_at: datetime
+    score_deltas: dict[str, ScoreDeltaOut]
+    new_issues: list[IssueSummaryOut]
+    resolved_issues: list[IssueSummaryOut]
+    persisting_issues: list[IssueSummaryOut]
+    page_count_baseline: int
+    page_count_current: int

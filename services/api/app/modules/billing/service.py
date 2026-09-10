@@ -25,6 +25,8 @@ from app.modules.billing.models import (
 )
 from app.modules.billing.razorpay_client import create_order as razorpay_create_order
 from app.modules.entitlements.models import AuditEntitlement, EntitlementStatus, EntitlementType
+from app.modules.notifications.service import notify_purchase_failed, notify_purchase_succeeded
+from app.modules.organizations.models import Organization
 
 
 async def get_plans(db: AsyncSession) -> list[Plan]:
@@ -81,6 +83,15 @@ async def record_webhook_event(
     return True
 
 
+async def _org_owner(db: AsyncSession, organization_id: uuid.UUID):
+    from app.modules.auth.models import User
+
+    org = (await db.execute(select(Organization).where(Organization.id == organization_id))).scalar_one_or_none()
+    if org is None:
+        return None
+    return (await db.execute(select(User).where(User.id == org.owner_user_id))).scalar_one_or_none()
+
+
 async def process_payment_captured(db: AsyncSession, *, order_id: str, payment_id: str) -> None:
     purchase = (
         await db.execute(select(Purchase).where(Purchase.provider_order_id == order_id))
@@ -107,6 +118,10 @@ async def process_payment_captured(db: AsyncSession, *, order_id: str, payment_i
     )
     await db.commit()
 
+    owner = await _org_owner(db, purchase.organization_id)
+    if owner is not None:
+        await notify_purchase_succeeded(db, purchase=purchase, owner_user_id=owner.id, owner_email=owner.email)
+
 
 async def process_payment_failed(db: AsyncSession, *, order_id: str) -> None:
     purchase = (
@@ -117,3 +132,7 @@ async def process_payment_failed(db: AsyncSession, *, order_id: str) -> None:
     if purchase.status == PurchaseStatus.PENDING.value:
         purchase.status = PurchaseStatus.FAILED.value
         await db.commit()
+
+        owner = await _org_owner(db, purchase.organization_id)
+        if owner is not None:
+            await notify_purchase_failed(db, purchase=purchase, owner_user_id=owner.id, owner_email=owner.email)

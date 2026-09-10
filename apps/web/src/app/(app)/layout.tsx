@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { auth, signOut } from "@/lib/auth";
+import { NotificationBell } from "./NotificationBell";
 
 const NAV_LIVE = [
   { href: "/dashboard", label: "Overview" },
@@ -50,7 +51,13 @@ export default async function AppLayout({ children }: { children: React.ReactNod
           <Link href="/settings" className="block px-3 py-2 rounded-md text-sm hover:bg-white/5">
             Settings
           </Link>
+          <Link href="/admin" className="block px-3 py-2 rounded-md text-sm hover:bg-white/5 text-muted">
+            Admin
+          </Link>
         </nav>
+        <div className="px-3 pb-3 border-t border-border pt-3">
+          <NotificationBell />
+        </div>
         <div className="px-5 py-4 border-t border-border text-xs text-muted">
           <div className="truncate">{session.user?.email}</div>
           <form

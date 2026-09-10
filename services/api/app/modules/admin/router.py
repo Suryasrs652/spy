@@ -1,38 +1,26 @@
-"""§96 admin endpoints — SUPER_ADMIN only.
-
-M1 ships a functional slice (users/orgs/audits/feature-flags listing and
-toggling) rather than a stub; revenue/queue/error dashboards (§129) are M3.
+"""§96/§128/§129 admin endpoints — real SUPER_ADMIN session auth (see
+`app.core.deps.require_super_admin`), not the M1 shared-token placeholder.
 """
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, Header
+from fastapi import APIRouter, Depends
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import get_settings
-from app.core.errors import ForbiddenError, NotFoundError
+from app.core.deps import require_super_admin
+from app.core.errors import NotFoundError
+from app.db.base import utcnow
 from app.db.session import get_db
-from app.modules.admin.models import FeatureFlag
+from app.modules.admin import service
+from app.modules.admin.models import AuditLog, FeatureFlag
 from app.modules.audits.models import Audit
 from app.modules.auth.models import User
 from app.modules.organizations.models import Organization
 
-router = APIRouter(prefix="/admin", tags=["admin"])
+router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_super_admin)])
 
 
-async def require_super_admin(x_internal_token: str | None = Header(default=None, alias="X-Internal-Token")) -> None:
-    """M1's admin authorization is the same shared internal token used for
-    service-to-service calls — a real SUPER_ADMIN role/session check
-    belongs in M3's admin dashboard build-out (§128/§129); until then this
-    keeps the surface unreachable from a normal user session rather than
-    leaving it open.
-    """
-    settings = get_settings()
-    if not x_internal_token or x_internal_token != settings.internal_service_token:
-        raise ForbiddenError("Admin access required.")
-
-
-@router.get("/users", dependencies=[Depends(require_super_admin)])
+@router.get("/users")
 async def list_users(db: AsyncSession = Depends(get_db), limit: int = 50, offset: int = 0) -> list[dict]:
     result = await db.execute(select(User).order_by(User.created_at.desc()).limit(limit).offset(offset))
     return [
@@ -42,13 +30,13 @@ async def list_users(db: AsyncSession = Depends(get_db), limit: int = 50, offset
     ]
 
 
-@router.get("/organizations", dependencies=[Depends(require_super_admin)])
+@router.get("/organizations")
 async def list_organizations(db: AsyncSession = Depends(get_db), limit: int = 50, offset: int = 0) -> list[dict]:
     result = await db.execute(select(Organization).order_by(Organization.created_at.desc()).limit(limit).offset(offset))
     return [{"id": str(o.id), "name": o.name, "slug": o.slug} for o in result.scalars().all()]
 
 
-@router.get("/audits", dependencies=[Depends(require_super_admin)])
+@router.get("/audits")
 async def list_all_audits(db: AsyncSession = Depends(get_db), limit: int = 50, offset: int = 0) -> list[dict]:
     result = await db.execute(select(Audit).order_by(Audit.created_at.desc()).limit(limit).offset(offset))
     return [
@@ -58,7 +46,7 @@ async def list_all_audits(db: AsyncSession = Depends(get_db), limit: int = 50, o
     ]
 
 
-@router.get("/overview", dependencies=[Depends(require_super_admin)])
+@router.get("/overview")
 async def overview(db: AsyncSession = Depends(get_db)) -> dict:
     total_users = (await db.execute(select(func.count()).select_from(User))).scalar_one()
     verified_users = (
@@ -77,17 +65,55 @@ async def overview(db: AsyncSession = Depends(get_db)) -> dict:
     }
 
 
-@router.get("/feature-flags", dependencies=[Depends(require_super_admin)])
+@router.get("/revenue")
+async def revenue(days: int = 30, db: AsyncSession = Depends(get_db)) -> dict:
+    return await service.get_revenue_summary(db, days=days)
+
+
+@router.get("/queue")
+async def queue_health(db: AsyncSession = Depends(get_db)) -> dict:
+    return await service.get_queue_health(db)
+
+
+@router.get("/errors")
+async def error_summary(days: int = 7, db: AsyncSession = Depends(get_db)) -> dict:
+    return await service.get_error_summary(db, days=days)
+
+
+@router.get("/audit-logs")
+async def audit_logs(limit: int = 100, offset: int = 0, db: AsyncSession = Depends(get_db)) -> list[dict]:
+    logs = await service.list_audit_logs(db, limit=limit, offset=offset)
+    return [
+        {
+            "id": log.id, "organization_id": str(log.organization_id) if log.organization_id else None,
+            "user_id": str(log.user_id) if log.user_id else None, "action": log.action,
+            "entity_type": log.entity_type, "entity_id": log.entity_id,
+            "metadata": log.metadata_json, "created_at": log.created_at.isoformat(),
+        }
+        for log in logs
+    ]
+
+
+@router.get("/feature-flags")
 async def list_feature_flags(db: AsyncSession = Depends(get_db)) -> list[dict]:
     result = await db.execute(select(FeatureFlag))
     return [{"key": f.key, "enabled": f.enabled, "config": f.config} for f in result.scalars().all()]
 
 
-@router.patch("/feature-flags/{key}", dependencies=[Depends(require_super_admin)])
-async def update_feature_flag(key: str, enabled: bool, db: AsyncSession = Depends(get_db)) -> dict:
+@router.patch("/feature-flags/{key}")
+async def update_feature_flag(
+    key: str, enabled: bool, admin: User = Depends(require_super_admin), db: AsyncSession = Depends(get_db)
+) -> dict:
     flag = (await db.execute(select(FeatureFlag).where(FeatureFlag.key == key))).scalar_one_or_none()
     if flag is None:
         raise NotFoundError(f"Feature flag {key!r} not found.")
     flag.enabled = enabled
+    db.add(
+        AuditLog(
+            organization_id=None, user_id=admin.id, action="feature_flag.update",
+            entity_type="feature_flag", entity_id=key, metadata_json={"enabled": enabled},
+            created_at=utcnow(),
+        )
+    )
     await db.commit()
     return {"key": flag.key, "enabled": flag.enabled}

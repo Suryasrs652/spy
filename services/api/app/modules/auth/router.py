@@ -64,3 +64,11 @@ async def me(user: User = Depends(get_current_user)) -> MeResponse:
         email_verified=user.is_email_verified,
         created_at=user.created_at,
     )
+
+
+@router.delete("/me", status_code=200)
+async def delete_account(
+    user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)
+) -> dict:
+    await service.delete_own_account(db, user=user)
+    return {"deleted": True}

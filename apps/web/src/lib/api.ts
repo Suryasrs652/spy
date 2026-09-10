@@ -155,6 +155,33 @@ export interface Recommendation {
   group: string;
 }
 
+export interface ScoreDelta {
+  baseline: number | null;
+  current: number | null;
+  delta: number | null;
+}
+
+export interface IssueSummary {
+  rule_id: string;
+  category: string;
+  severity: string;
+  title: string;
+  affected_count: number;
+}
+
+export interface AuditComparison {
+  baseline_audit_id: string;
+  current_audit_id: string;
+  baseline_created_at: string;
+  current_created_at: string;
+  score_deltas: Record<string, ScoreDelta>;
+  new_issues: IssueSummary[];
+  resolved_issues: IssueSummary[];
+  persisting_issues: IssueSummary[];
+  page_count_baseline: number;
+  page_count_current: number;
+}
+
 export interface Plan {
   code: string;
   name: string;

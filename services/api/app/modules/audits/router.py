@@ -12,6 +12,7 @@ from app.core.ratelimit import rate_limit_dependency
 from app.db.session import get_db
 from app.modules.audits import service
 from app.modules.audits.schemas import (
+    AuditComparisonOut,
     AuditCreateRequest,
     AuditIssueOut,
     AuditOut,
@@ -120,6 +121,19 @@ async def get_audit_recommendations(
 ) -> list[RecommendationOut]:
     recs = await service.list_recommendations(db, organization_id=ctx.organization_id, audit_id=audit_id)
     return [RecommendationOut.model_validate(r) for r in recs]
+
+
+@router.get("/{audit_id}/compare/{other_audit_id}", response_model=AuditComparisonOut)
+async def compare_audits(
+    audit_id: uuid.UUID,
+    other_audit_id: uuid.UUID,
+    ctx: AuthContext = Depends(require_role(*ROLE_CAN_VIEW)),
+    db: AsyncSession = Depends(get_db),
+) -> AuditComparisonOut:
+    comparison = await service.compare_audits(
+        db, organization_id=ctx.organization_id, audit_id=audit_id, other_audit_id=other_audit_id
+    )
+    return AuditComparisonOut.model_validate(comparison)
 
 
 @router.post("/{audit_id}/cancel", response_model=AuditOut)

@@ -77,6 +77,14 @@ class Settings(BaseSettings):
     smtp_port: int = 1025
     smtp_from: str = "no-reply@spy.local"
 
+    # §109 data retention — how long each kind of row is kept before a daily
+    # job purges it. Audits themselves (scores/evidence/issue summaries) are
+    # never purged by this job, only the heavy per-page crawl detail behind
+    # them; see app/workers/tasks/retention.py.
+    crawl_data_retention_days: int = 180
+    audit_log_retention_days: int = 400
+    idempotency_key_retention_days: int = 7
+
     @property
     def is_production(self) -> bool:
         return self.environment == "production"

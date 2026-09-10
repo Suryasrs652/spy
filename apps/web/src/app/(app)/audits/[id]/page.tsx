@@ -5,6 +5,7 @@ import { use as usePromise } from "react";
 import Link from "next/link";
 import { apiGet, apiPost } from "@/lib/api";
 import type { Audit, AuditIssue, AuditProgress, Recommendation } from "@/lib/api";
+import { CompareSelector } from "./CompareSelector";
 
 const SCORE_CARDS: { key: keyof Audit; label: string }[] = [
   { key: "spy_score", label: "Spy Score" },
@@ -136,6 +137,8 @@ export default function AuditResultsPage({ params }: { params: Promise<{ id: str
           );
         })}
       </div>
+
+      <CompareSelector auditId={audit.id} projectId={audit.project_id} />
 
       <h2 className="text-lg font-semibold mb-4">Issues ({issues?.length ?? 0})</h2>
       <div className="space-y-3 mb-10">

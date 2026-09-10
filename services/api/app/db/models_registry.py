@@ -10,6 +10,7 @@ from app.modules.billing import models as billing_models  # noqa: F401
 from app.modules.crawler import models as crawler_models  # noqa: F401
 from app.modules.entitlements import models as entitlements_models  # noqa: F401
 from app.modules.gsc import models as gsc_models  # noqa: F401
+from app.modules.notifications import models as notifications_models  # noqa: F401
 from app.modules.organizations import models as organizations_models  # noqa: F401
 from app.modules.projects import models as projects_models  # noqa: F401
 from app.modules.recommendations import models as recommendations_models  # noqa: F401
