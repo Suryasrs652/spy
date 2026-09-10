@@ -44,6 +44,17 @@ async def get_audit(db: AsyncSession, *, organization_id: uuid.UUID, audit_id: u
     return audit
 
 
+async def list_audits_for_project(
+    db: AsyncSession, *, organization_id: uuid.UUID, project_id: uuid.UUID
+) -> list[Audit]:
+    result = await db.execute(
+        select(Audit)
+        .where(Audit.organization_id == organization_id, Audit.project_id == project_id)
+        .order_by(Audit.created_at.desc())
+    )
+    return list(result.scalars().all())
+
+
 async def get_audit_progress(db: AsyncSession, *, organization_id: uuid.UUID, audit_id: uuid.UUID) -> AuditJob:
     audit = await get_audit(db, organization_id=organization_id, audit_id=audit_id)
     result = await db.execute(select(AuditJob).where(AuditJob.audit_id == audit.id))

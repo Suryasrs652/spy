@@ -7,6 +7,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.deps import AuthContext, require_role
 from app.db.session import get_db
+from app.modules.audits import service as audits_service
+from app.modules.audits.schemas import AuditOut
 from app.modules.organizations.models import ROLE_CAN_MANAGE_PROJECTS, ROLE_CAN_VIEW
 from app.modules.projects import service
 from app.modules.projects.schemas import ProjectCreateRequest, ProjectOut, ProjectUpdateRequest
@@ -43,6 +45,21 @@ async def get_project(
 ) -> ProjectOut:
     project = await service.get_project(db, organization_id=ctx.organization_id, project_id=project_id)
     return ProjectOut.model_validate(project)
+
+
+@router.get("/{project_id}/audits", response_model=list[AuditOut])
+async def list_project_audits(
+    project_id: uuid.UUID,
+    ctx: AuthContext = Depends(require_role(*ROLE_CAN_VIEW)),
+    db: AsyncSession = Depends(get_db),
+) -> list[AuditOut]:
+    # get_project first so a cross-tenant project_id 404s (§122) rather than
+    # silently returning an empty list.
+    await service.get_project(db, organization_id=ctx.organization_id, project_id=project_id)
+    audits = await audits_service.list_audits_for_project(
+        db, organization_id=ctx.organization_id, project_id=project_id
+    )
+    return [AuditOut.model_validate(a) for a in audits]
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
