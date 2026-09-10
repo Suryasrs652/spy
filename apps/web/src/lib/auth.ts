@@ -25,6 +25,33 @@ interface InternalUserOut {
   refresh_token: string;
 }
 
+/**
+ * The `user` object as it exists between `authorize()`/`signIn()` and the
+ * `jwt()` callback — Auth.js's own `User` type only guarantees `id`/`email`/
+ * `name`/`image`, so the FastAPI-specific fields are layered on here with
+ * real types instead of `Record<string, unknown>` (which made every read a
+ * silent `unknown`, and Next 16's stricter checking now bounces).
+ */
+interface AuthenticatedUser {
+  id: string;
+  email?: string | null;
+  organizationId: string;
+  accessToken: string;
+  refreshToken: string;
+  emailVerified: boolean;
+}
+
+function toAuthenticatedUser(result: InternalUserOut): AuthenticatedUser {
+  return {
+    id: result.user_id,
+    email: result.email,
+    organizationId: result.default_organization_id,
+    accessToken: result.access_token,
+    refreshToken: result.refresh_token,
+    emailVerified: result.email_verified,
+  };
+}
+
 async function callInternalAuth(path: string, body: Record<string, unknown>): Promise<InternalUserOut | null> {
   const res = await fetch(`${API_BASE_URL}/internal/auth/${path}`, {
     method: "POST",
@@ -70,14 +97,7 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
           password: credentials.password,
         });
         if (!result) return null;
-        return {
-          id: result.user_id,
-          email: result.email,
-          emailVerified: result.email_verified,
-          organizationId: result.default_organization_id,
-          accessToken: result.access_token,
-          refreshToken: result.refresh_token,
-        } as never;
+        return toAuthenticatedUser(result);
       },
     }),
     Google({
@@ -96,17 +116,13 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
         if (!result) return false;
         // Stash FastAPI's identity onto the `user` object so the jwt()
         // callback below (which runs right after signIn) can read it.
-        (user as Record<string, unknown>).id = result.user_id;
-        (user as Record<string, unknown>).organizationId = result.default_organization_id;
-        (user as Record<string, unknown>).accessToken = result.access_token;
-        (user as Record<string, unknown>).refreshToken = result.refresh_token;
-        (user as Record<string, unknown>).emailVerified = result.email_verified;
+        Object.assign(user, toAuthenticatedUser(result));
       }
       return true;
     },
     async jwt({ token, user }) {
       if (user) {
-        const u = user as Record<string, unknown>;
+        const u = user as unknown as AuthenticatedUser;
         token.userId = u.id;
         token.organizationId = u.organizationId;
         token.accessToken = u.accessToken;
