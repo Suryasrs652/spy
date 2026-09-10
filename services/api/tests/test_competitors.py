@@ -12,6 +12,7 @@ from app.modules.competitors.models import CompetitorStatus
 from app.modules.competitors.service import (
     add_competitor,
     get_competitor_comparison,
+    get_content_gap_analysis,
     list_competitors,
     remove_competitor,
     run_competitor_benchmark,
@@ -143,3 +144,65 @@ async def test_run_competitor_benchmark_against_a_real_site(db, verified_user):
 
     after_count = (await db.execute(select(func.count()).select_from(CrawlPage))).scalar_one()
     assert after_count == before_count, "competitor crawls must never persist crawl_pages rows"
+
+
+@pytest.mark.asyncio
+async def test_content_gap_without_benchmark_reports_no_data(db, verified_user):
+    user, org_id, _token = verified_user
+    project = await _make_project(db, organization_id=org_id, domain="gap-no-benchmark.example")
+    competitor = await add_competitor(
+        db, organization_id=org_id, project_id=project.id, name="Rival", url="https://rival5.example/", user_id=user.id,
+    )
+
+    result = await get_content_gap_analysis(db, organization_id=org_id, project_id=project.id, competitor_id=competitor.id)
+    assert result["has_data"] is False
+    assert "benchmark" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_content_gap_without_own_audit_reports_no_data(db, verified_user):
+    user, org_id, _token = verified_user
+    project = await _make_project(db, organization_id=org_id, domain="gap-no-audit.example")
+    competitor = await add_competitor(
+        db, organization_id=org_id, project_id=project.id, name="Rival", url="https://rival6.example/", user_id=user.id,
+    )
+    competitor.status = CompetitorStatus.COMPLETED.value
+    competitor.evidence = {"top_terms": ["widgets", "pricing"]}
+    await db.commit()
+
+    result = await get_content_gap_analysis(db, organization_id=org_id, project_id=project.id, competitor_id=competitor.id)
+    assert result["has_data"] is False
+    assert "audit" in result["reason"]
+
+
+@pytest.mark.asyncio
+async def test_content_gap_finds_terms_competitor_covers_that_you_dont(db, verified_user):
+    from app.modules.crawler.models import CrawlPage
+
+    user, org_id, _token = verified_user
+    project = await _make_project(db, organization_id=org_id, domain="gap-full.example")
+    competitor = await add_competitor(
+        db, organization_id=org_id, project_id=project.id, name="Rival", url="https://rival7.example/", user_id=user.id,
+    )
+    competitor.status = CompetitorStatus.COMPLETED.value
+    competitor.evidence = {"top_terms": ["widgets", "shipping", "returns"]}
+    await db.commit()
+
+    audit = Audit(
+        organization_id=org_id, project_id=project.id, requested_by=user.id,
+        status=AuditStatus.COMPLETED.value, spy_score=70.0,
+    )
+    db.add(audit)
+    await db.flush()
+    db.add(CrawlPage(
+        audit_id=audit.id, project_id=project.id, url="https://gap-full.example/",
+        normalized_url="https://gap-full.example/", indexable=True,
+        title="Best Widgets Online", h1="Widgets",
+    ))
+    await db.commit()
+
+    result = await get_content_gap_analysis(db, organization_id=org_id, project_id=project.id, competitor_id=competitor.id)
+    assert result["has_data"] is True
+    assert "widgets" not in result["gap_terms"]
+    assert "shipping" in result["gap_terms"]
+    assert "returns" in result["gap_terms"]

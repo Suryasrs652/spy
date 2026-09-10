@@ -41,3 +41,12 @@ class CompetitorComparisonOut(BaseModel):
     competitor: CompetitorOut
     your_latest_audit_id: uuid.UUID | None
     comparisons: list[ScoreComparisonOut]
+
+
+class ContentGapOut(BaseModel):
+    has_data: bool
+    reason: str | None = None
+    your_terms: list[str] = []
+    competitor_terms: list[str] = []
+    gap_terms: list[str] = []
+    methodology: str | None = None

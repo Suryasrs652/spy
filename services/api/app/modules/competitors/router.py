@@ -10,7 +10,12 @@ from app.core.ratelimit import rate_limit_dependency
 from app.db.session import get_db
 from app.modules.auth.models import User
 from app.modules.competitors import service
-from app.modules.competitors.schemas import CompetitorComparisonOut, CompetitorCreate, CompetitorOut
+from app.modules.competitors.schemas import (
+    CompetitorComparisonOut,
+    CompetitorCreate,
+    CompetitorOut,
+    ContentGapOut,
+)
 from app.modules.organizations.models import ROLE_CAN_MANAGE_PROJECTS, ROLE_CAN_VIEW
 
 router = APIRouter(prefix="/projects", tags=["competitors"])
@@ -87,3 +92,16 @@ async def compare_competitor(
         your_latest_audit_id=comparison["your_latest_audit_id"],
         comparisons=comparison["comparisons"],
     )
+
+
+@router.get("/{project_id}/competitors/{competitor_id}/content-gap", response_model=ContentGapOut)
+async def content_gap(
+    project_id: uuid.UUID,
+    competitor_id: uuid.UUID,
+    ctx: AuthContext = Depends(require_role(*ROLE_CAN_VIEW)),
+    db: AsyncSession = Depends(get_db),
+) -> ContentGapOut:
+    result = await service.get_content_gap_analysis(
+        db, organization_id=ctx.organization_id, project_id=project_id, competitor_id=competitor_id
+    )
+    return ContentGapOut(**result)
