@@ -288,3 +288,31 @@ def test_authority_score_rewards_higher_internal_pagerank() -> None:
         referring_domains=5, total_backlinks=5,
     )
     assert high.authority_score > low.authority_score
+
+
+def test_clean_heading_pct_counts_skipped_ranks_as_unclean() -> None:
+    """Regression: this counted only `h1_count == 1`, so a site whose pages
+    jump H1 -> H3 reported 100% clean headings and the AEO score credited
+    hygiene it didn't have. A broken outline is exactly what stops an answer
+    engine finding the part of the page that answers the question.
+    """
+    ordered = _clean_site(4)
+    skipped = [
+        _page(
+            url=p.url, normalized_url=p.normalized_url, canonical_url=p.canonical_url,
+            title=p.title, meta_description=p.meta_description, crawl_depth=p.crawl_depth,
+            h1_count=1, heading_order_valid=False,
+        )
+        for p in ordered
+    ]
+
+    ordered_score = compute_spy_score(
+        pages=ordered, findings=run_all_rules(ordered, []), urls_processed=len(ordered)
+    )
+    skipped_score = compute_spy_score(
+        pages=skipped, findings=run_all_rules(skipped, []), urls_processed=len(skipped)
+    )
+
+    assert ordered_score.evidence["aeo"]["clean_heading_pct"] == 100.0
+    assert skipped_score.evidence["aeo"]["clean_heading_pct"] == 0.0
+    assert skipped_score.aeo_score < ordered_score.aeo_score

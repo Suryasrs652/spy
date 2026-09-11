@@ -136,8 +136,9 @@ def _aeo_score(pages: list[CrawlPage]) -> tuple[float, dict]:
         formal FAQ blocks)
       - structured-answer readability (lists/tables/definition lists, which
         answer engines and AI crawlers extract far more reliably than prose)
-      - heading hygiene (one H1 per page — answer engines use it to find
-        the page's primary topic)
+      - heading hygiene (exactly one H1, and no skipped ranks below it —
+        answer engines use the H1 to find the page's primary topic and walk
+        the outline beneath it to find the part that answers the question)
       - source attribution (author/byline markup — §48 "citation
         readability": AI systems favor content with clear authorship)
     """
@@ -146,7 +147,16 @@ def _aeo_score(pages: list[CrawlPage]) -> tuple[float, dict]:
         return 0.0, {"reason": "no indexable pages"}
 
     schema_coverage_pct = 100 * sum(1 for p in indexable if p.has_schema) / len(indexable)
-    clean_heading_pct = 100 * sum(1 for p in indexable if p.h1_count == 1) / len(indexable)
+    # Both halves matter and this used to count only the first: a page can
+    # have exactly one H1 and still jump H1 -> H3, which breaks the outline
+    # an answer engine walks. Counting only H1s reported 100% "clean" on a
+    # site where 17% of pages skipped a rank, so the score credited hygiene
+    # the site didn't have. `heading_order_valid` is already computed per
+    # page by the parser and used by SEO_CONTENT_007; it just wasn't
+    # reaching the score.
+    clean_heading_pct = 100 * sum(
+        1 for p in indexable if p.h1_count == 1 and p.heading_order_valid
+    ) / len(indexable)
     question_coverage_pct = _question_coverage_pct(indexable)
     structured_content_pct = _structured_content_pct(indexable)
     byline_coverage_pct = _byline_coverage_pct(indexable)

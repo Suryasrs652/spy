@@ -21,7 +21,7 @@ The score is a pure function of stored crawl evidence. Read
 | Field | Means | Fix when low |
 | --- | --- | --- |
 | `schema_coverage_pct` | Share of indexable pages carrying any JSON-LD | Add schema; `Article`, `Service`, `FAQPage` as the content warrants |
-| `clean_heading_pct` | Pages whose heading ranks don't skip levels | Repair the outline — H2 → H3, never H2 → H4 |
+| `clean_heading_pct` | Pages with exactly one H1 **and** no skipped ranks below it | Repair the outline — H1 → H2 → H3, never H1 → H3 |
 | `question_coverage_pct` | Pages with at least one question-shaped heading | Add real questions users ask, as headings, answered directly beneath |
 | `structured_content_pct` | Pages using lists, tables or definition lists | Break dense prose into extractable structures |
 | `byline_coverage_pct` | Pages with a detectable author byline | Add named authors and bios |

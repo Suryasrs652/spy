@@ -4,7 +4,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
-from app.core.text_width import display_width
+from app.core.text_width import display_width, is_shouting
 from app.modules.crawler.models import CrawlPage
 from app.modules.seo.models import Severity
 from app.modules.seo.rules.base import RuleContext, RuleFinding, rule
@@ -183,7 +183,7 @@ def title_all_caps(ctx: RuleContext) -> RuleFinding | None:
     affected = [
         (p.id, {"url": p.url, "title": p.title})
         for p in ctx.indexable()
-        if p.title and len(p.title) > 3 and p.title == p.title.upper() and p.title != p.title.lower()
+        if p.title and is_shouting(p.title)
     ]
     if not affected:
         return None
@@ -221,9 +221,7 @@ def meta_description_all_caps(ctx: RuleContext) -> RuleFinding | None:
     affected = [
         (p.id, {"url": p.url})
         for p in ctx.indexable()
-        if p.meta_description and len(p.meta_description) > 10
-        and p.meta_description == p.meta_description.upper()
-        and p.meta_description != p.meta_description.lower()
+        if p.meta_description and is_shouting(p.meta_description)
     ]
     if not affected:
         return None
