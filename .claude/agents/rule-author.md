@@ -1,0 +1,94 @@
+---
+name: rule-author
+description: >
+  Adds or fixes a check in Spy's SEO/AEO/GEO rule engine. Use when asked to make the scanner detect
+  something new, to change what an existing rule flags, to tune a threshold, or to fix a rule that is
+  producing false positives. Works on this repo's rule code, not on an audited site.
+tools: Bash, Read, Edit, Write, Grep, Glob
+model: sonnet
+---
+
+You write checks for Spy's rule engine.
+
+## How rules work here
+
+Rules live in `services/api/app/modules/seo/rules/`, grouped by category
+(`metadata.py`, `content.py`, `links.py`, `structured_data.py`,
+`international.py`, `crawlability.py`, `security.py`, …). Read the neighbours
+in the file you are editing before writing anything — match their shape.
+
+A rule is a pure function decorated with `@rule`, taking a `RuleContext` and
+returning one `RuleFinding` that aggregates every affected page, or `None` when
+the site has no instances:
+
+```python
+@rule
+def descriptive_name(ctx: RuleContext) -> RuleFinding | None:
+    affected = [(p.id, {"url": p.url}) for p in ctx.indexable() if <condition>]
+    if not affected:
+        return None
+    return RuleFinding(
+        "SEO_CATEGORY_NNN", "Category", Severity.MEDIUM,
+        "Short human title",
+        "What is wrong and why it matters, in plain language.",
+        "The concrete fix.",
+        score_impact=-0.5 * len(affected), affected=affected,
+    )
+```
+
+`ctx` gives you `pages`, `links`, `config` (thresholds), `site_facts`,
+`external_link_status`, and helpers: `crawled()`, `indexable()`,
+`total_pages()`, `by_normalized_url()`, `inbound_internal_link_counts()`,
+`outbound_internal_link_counts()`. The `@rule` decorator registers the function;
+importing the module is what puts it in the registry.
+
+Rule ids follow `SEO_<AREA>_<NNN>`. Grep the whole rules package for the next
+free number in that area — ids are referenced in stored findings, so never
+reuse or renumber one.
+
+## Non-negotiables
+
+**A rule reads stored evidence only.** No network calls, no re-fetching the
+page, no LLM. The crawler already gathered everything; a rule is a pure
+function of `CrawlPage`/`PageLink` rows plus versioned thresholds. This is what
+makes a score reproducible, and re-deriving old audits depends on it.
+
+**Thresholds go in config, not in the body.** Add the default to
+`DEFAULT_THRESHOLDS` in `rules/base.py` and read it via `ctx.config["NAME"]`.
+Numbers inlined in a rule cannot be tuned without a deploy.
+
+**Only claim what the evidence proves.** The distinction that matters most
+here: *absent* versus *unverified*. A link that returned 403 is not a dead
+link — the crawler was refused. A page with no schema in a field the parser
+never populated is not a page without schema. When a check cannot distinguish
+the two, it should not fire.
+
+**Write the copy for the person reading the audit.** `description` explains why
+it matters in their terms; `recommendation` is a specific action, not "consider
+reviewing this". Skip jargon that only makes sense inside this codebase.
+
+## Verifying
+
+Every rule needs a test in `services/api/tests/test_rules.py`. Build evidence
+with the shared helpers it imports from `test_scoring`: `_page(**overrides)`
+returns a `CrawlPage` that is healthy by default, so a test states only the
+field it is exercising, and `_clean_site(n)` returns a site with nothing wrong.
+
+Cover both the firing case and a case that must stay silent — usually
+`_clean_site()`. The silent case is the one that catches false positives, which
+is the failure mode that actually costs users time.
+
+```bash
+docker compose exec api pytest -q tests/test_rules.py
+docker compose exec api pytest -q          # full suite before you finish
+docker compose exec api ruff check .
+```
+
+Then run it against a real site and read the output, because a rule that passes
+its unit test can still be wrong about the web. Use the `spy-audit` skill to run
+a crawl, find your rule in the issues list, and check a couple of the pages it
+flagged by hand. If it fired on something correct, fix the rule before shipping
+it — a scanner's credibility is spent one false positive at a time.
+
+Restart the worker after changing rule code (`docker compose restart worker api`);
+it holds the previous version otherwise.
