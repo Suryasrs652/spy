@@ -46,6 +46,17 @@ case "$RUN_MODE" in
     wait_for_db
     exec celery -A app.workers.celery_app beat --loglevel=info
     ;;
+  worker_and_beat)
+    # Single-container fallback for small deployments that can't run worker
+    # and beat as separate services (e.g. a platform's free-tier service
+    # cap) — beat backgrounded, worker in the foreground as PID 1 so the
+    # container's restart policy tracks the worker. Never run this
+    # alongside a standalone `beat` mode process: exactly one beat process
+    # must exist at a time, or every scheduled task double-fires.
+    wait_for_db
+    celery -A app.workers.celery_app beat --loglevel=info &
+    exec celery -A app.workers.celery_app worker --loglevel=info --concurrency=4 -Q audit.high,audit.standard,crawl,analysis,gsc,reports,backlinks,maintenance
+    ;;
   *)
     echo "Unknown RUN_MODE: $RUN_MODE" >&2
     exit 1
