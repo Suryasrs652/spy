@@ -31,12 +31,7 @@ const SECURITY_HEADERS = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
-  // "standalone" packages a self-contained Node server for our own Docker
-  // image (infra/docker/Dockerfile.web) — Vercel's own build pipeline
-  // produces its own serverless/edge output and conflicts with it (a
-  // standalone build's trace files aren't in the shape Vercel's builder
-  // expects), so it's skipped when VERCEL is set.
-  ...(process.env.VERCEL ? {} : { output: "standalone" }),
+  output: "standalone",
   // Dev-only: lets `next dev`'s HMR/Fast Refresh accept requests from
   // spy.local (a hosts-file alias to localhost used for local testing) —
   // without this, Next's dev-origin protection silently blocks the HMR

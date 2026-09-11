@@ -76,48 +76,15 @@ actually runs" at the bottom.
 - **App code**: redeploy the previous image tag for api/web/worker/beat. Since migrations are additive (never destructive within a milestone) and alembic tracks the applied revision in the DB, an old image talking to a DB that's ahead of it works for anything that doesn't touch the new columns/tables — but confirm this holds for the specific migration before relying on it; if in doubt, `alembic downgrade -1` first (matching the M1 verification step: migrations are only truly reversible if you've tested the specific downgrade).
 - **Data**: restore from the most recent `scripts/backup.sh` snapshot per `scripts/README.md` if a rollback needs to also undo data changes, not just code.
 
-## Where this runs
+## Choosing where this actually runs
 
-**Backend: a single VPS**, via `docker-compose.prod.yml` — postgres, redis,
-minio, api, worker, beat and a Caddy reverse proxy, all on one box. Caddy is
-the only service with published ports (80/443) and gets Let's Encrypt certs
-automatically per hostname. **Frontend: Vercel** (`apps/web`), reaching the
-box over the public API hostname; to run it on the VPS instead, add
-`--profile fullstack` and set `WEB_HOSTNAME`.
-
-### First-time VPS setup
-
-1. **Provision** a server (2 vCPU / 4 GB RAM is a sane floor — Playwright's
-   Chromium and a 4-worker Celery pool are the memory drivers) and install
-   Docker Engine + the compose plugin.
-2. **DNS**: point `API_HOSTNAME` and `STORAGE_HOSTNAME` (plus `WEB_HOSTNAME`
-   if running fullstack) at the box's public IP. Caddy can't issue certs
-   until these resolve.
-3. **Firewall**: allow 80/443 (and your SSH port) only. Nothing else needs
-   to be reachable — postgres/redis/minio publish no host ports.
-4. **Secrets**: `cp .env.production.example .env.production` on the server
-   and fill it in; the generation one-liners are in that file's header.
-5. **Boot**: `docker compose -f docker-compose.prod.yml up -d --build`.
-   The api container runs `alembic upgrade head` on start (idempotent).
-6. **Verify** per the section above, then set `is_super_admin` on your own
-   user row to reach `/admin`.
-
-### Updating
-
-```
-git pull
-docker compose -f docker-compose.prod.yml up -d --build
-```
-
-Compose recreates only what changed. Roll back by checking out the previous
-commit and re-running the same command (see "Rolling back" above for the
-migration caveat).
-
-### What this deliberately trades away
-
-One box means no redundancy: a host failure is downtime, and postgres lives
-on a local volume, so `scripts/backup.sh` (and a *tested* restore) is the
-only thing standing between a disk loss and total data loss — run it on a
-schedule and keep copies off the box. Moving to managed Postgres/Redis and
-a real object store later only changes `.env.production`; the app code
-doesn't care.
+Not decided in this repo: which cloud/PaaS, what the actual domain is, and
+who holds the account credentials. Reasonable options for this stack
+(FastAPI + Celery + Postgres + Redis + S3-compatible storage + Next.js) span
+from a single VPS running the existing `docker-compose.yml` (swap `target:
+dev` for `target: production` and point at managed Postgres/Redis/S3) to a
+managed container platform (Railway, Render, Fly.io) to a full cloud
+provider (AWS/GCP/Azure) with managed Postgres (RDS/Cloud SQL) and a
+managed Redis. That choice determines the actual CI deploy step, DNS setup,
+and secrets storage mechanism — none of which can be built here without
+first knowing it.
