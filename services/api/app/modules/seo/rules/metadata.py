@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 from collections import defaultdict
 
+from app.core.text_width import display_width
 from app.modules.crawler.models import CrawlPage
 from app.modules.seo.models import Severity
 from app.modules.seo.rules.base import RuleContext, RuleFinding, rule
@@ -48,8 +49,8 @@ def duplicate_titles(ctx: RuleContext) -> RuleFinding | None:
 def title_length(ctx: RuleContext) -> RuleFinding | None:
     min_len, max_len = ctx.config["MIN_TITLE_LENGTH"], ctx.config["MAX_TITLE_LENGTH"]
     affected = [
-        (p.id, {"url": p.url, "title": p.title, "length": len(p.title)})
-        for p in ctx.crawled() if p.title and not (min_len <= len(p.title) <= max_len)
+        (p.id, {"url": p.url, "title": p.title, "length": display_width(p.title)})
+        for p in ctx.crawled() if p.title and not (min_len <= display_width(p.title) <= max_len)
     ]
     if not affected:
         return None
@@ -98,9 +99,9 @@ def duplicate_meta_description(ctx: RuleContext) -> RuleFinding | None:
 def description_length(ctx: RuleContext) -> RuleFinding | None:
     min_len, max_len = ctx.config["MIN_DESCRIPTION_LENGTH"], ctx.config["MAX_DESCRIPTION_LENGTH"]
     affected = [
-        (p.id, {"url": p.url, "length": len(p.meta_description)})
+        (p.id, {"url": p.url, "length": display_width(p.meta_description)})
         for p in ctx.crawled()
-        if p.meta_description and not (min_len <= len(p.meta_description) <= max_len)
+        if p.meta_description and not (min_len <= display_width(p.meta_description) <= max_len)
     ]
     if not affected:
         return None
