@@ -32,6 +32,12 @@ const SECURITY_HEADERS = [
 const nextConfig: NextConfig = {
   reactStrictMode: true,
   output: "standalone",
+  // Dev-only: lets `next dev`'s HMR/Fast Refresh accept requests from
+  // spy.local (a hosts-file alias to localhost used for local testing) —
+  // without this, Next's dev-origin protection silently blocks the HMR
+  // websocket and the page never finishes hydrating. No effect in
+  // production (allowedDevOrigins is a dev-server-only option).
+  allowedDevOrigins: ["spy.local"],
   async headers() {
     return [{ source: "/:path*", headers: SECURITY_HEADERS }];
   },

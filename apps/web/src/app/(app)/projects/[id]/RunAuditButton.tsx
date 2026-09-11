@@ -26,6 +26,10 @@ export function RunAuditButton({
         router.push("/billing");
         return;
       }
+      if (err instanceof ApiError && err.code === "ADMIN_DAILY_LIMIT_REACHED") {
+        setError(err.message);
+        return;
+      }
       setError(err instanceof ApiError ? err.message : "Couldn't start the audit.");
     } finally {
       setLoading(false);
@@ -34,6 +38,10 @@ export function RunAuditButton({
 
   if (!canRun && reason === "EMAIL_NOT_VERIFIED") {
     return <span className="text-sm text-muted">Verify your email to run an audit.</span>;
+  }
+
+  if (!canRun && reason === "ADMIN_DAILY_LIMIT_REACHED") {
+    return <span className="text-sm text-muted">Daily free audit limit reached — resets at UTC midnight.</span>;
   }
 
   return (

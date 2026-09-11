@@ -26,11 +26,11 @@ from __future__ import annotations
 
 import uuid
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ForbiddenError, PaymentRequiredError
+from app.core.errors import ForbiddenError, PaymentRequiredError, RateLimitedError
 from app.db.base import utcnow
 from app.modules.audits.models import Audit, AuditJob, AuditStatus, CURRENT_SCORE_VERSION
 from app.modules.auth.models import User
@@ -48,6 +48,15 @@ PAID_TYPES = (
     EntitlementType.PURCHASED.value,
     EntitlementType.ADMIN_GRANT.value,
 )
+
+# Super admins (app.modules.auth.models.User.is_super_admin) get a standing
+# daily allowance of free audits — a dogfooding/ops convenience, not a paid
+# plan — capped at ADMIN_DAILY_FREE_AUDITS per UTC calendar day rather than
+# a lifetime like FREE_LIFETIME. It's checked ahead of the one-time free
+# audit (never consumes it) but behind any paid entitlement, so an admin who
+# also happens to hold a purchased/subscription credit still spends that
+# first.
+ADMIN_DAILY_FREE_AUDITS = 2
 
 
 class EntitlementDecision:
@@ -67,6 +76,27 @@ async def _has_live_free_entitlement(db: AsyncSession, user_id: uuid.UUID) -> bo
         )
     )
     return result.first() is not None
+
+
+async def _admin_audits_used_today(db: AsyncSession, user_id: uuid.UUID) -> int:
+    """Count this admin's ADMIN_DAILY_FREE entitlements reserved/consumed
+    since UTC midnight — counts entitlement rows, not Audit rows (mirroring
+    `_has_live_free_entitlement` below), specifically so that
+    `create_audit_with_entitlement`'s own not-yet-committed Audit row
+    (flushed earlier in that function, before this check runs) never
+    counts against its own request. A RELEASED row (failed audit) doesn't
+    count either, the same fairness FREE_LIFETIME gets on failure.
+    """
+    start_of_day = utcnow().replace(hour=0, minute=0, second=0, microsecond=0)
+    result = await db.execute(
+        select(func.count()).select_from(AuditEntitlement).where(
+            AuditEntitlement.user_id == user_id,
+            AuditEntitlement.type == EntitlementType.ADMIN_DAILY_FREE.value,
+            AuditEntitlement.created_at >= start_of_day,
+            AuditEntitlement.status != EntitlementStatus.RELEASED.value,
+        )
+    )
+    return result.scalar_one()
 
 
 async def _find_reservable_paid_entitlement(
@@ -99,6 +129,15 @@ async def get_entitlement_status(db: AsyncSession, *, organization_id: uuid.UUID
 
     if not user.is_email_verified:
         return EntitlementDecision(can_run=False, type_=None, remaining=None, reason="EMAIL_NOT_VERIFIED")
+
+    if user.is_super_admin:
+        used_today = await _admin_audits_used_today(db, user.id)
+        if used_today < ADMIN_DAILY_FREE_AUDITS:
+            return EntitlementDecision(
+                can_run=True, type_=EntitlementType.ADMIN_DAILY_FREE.value,
+                remaining=ADMIN_DAILY_FREE_AUDITS - used_today, reason=None,
+            )
+        return EntitlementDecision(can_run=False, type_=None, remaining=0, reason="ADMIN_DAILY_LIMIT_REACHED")
 
     if await _has_live_free_entitlement(db, user.id):
         return EntitlementDecision(
@@ -173,6 +212,32 @@ async def create_audit_with_entitlement(
         paid_entitlement.status = EntitlementStatus.RESERVED.value
         paid_entitlement.reserved_at = utcnow()
         paid_entitlement.audit_id = audit.id
+        await db.flush()
+    elif user.is_super_admin:
+        # Daily admin allowance instead of the one-time free audit — see
+        # ADMIN_DAILY_FREE_AUDITS. Protected only by the organization lock
+        # taken above (good enough for a single admin double-clicking; this
+        # is a low-stakes internal convenience, not the fairness-critical
+        # consumer path that layer 2 below exists for).
+        if await _admin_audits_used_today(db, user.id) >= ADMIN_DAILY_FREE_AUDITS:
+            await db.rollback()
+            raise RateLimitedError(
+                f"You've used today's {ADMIN_DAILY_FREE_AUDITS} free admin audits — resets at UTC midnight.",
+                code="ADMIN_DAILY_LIMIT_REACHED",
+            )
+
+        entitlement = AuditEntitlement(
+            organization_id=organization.id,
+            user_id=user.id,
+            type=EntitlementType.ADMIN_DAILY_FREE.value,
+            status=EntitlementStatus.RESERVED.value,
+            audit_id=audit.id,
+            quantity=1,
+            remaining=0,
+            source="SUPER_ADMIN_DAILY_FREE",
+            reserved_at=utcnow(),
+        )
+        db.add(entitlement)
         await db.flush()
     else:
         if await _has_live_free_entitlement(db, user.id):

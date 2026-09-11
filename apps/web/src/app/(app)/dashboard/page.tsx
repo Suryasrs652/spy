@@ -30,6 +30,13 @@ export default async function DashboardPage() {
               Run My Next Audit
             </Link>
           </div>
+        ) : entitlement?.reason === "ADMIN_DAILY_LIMIT_REACHED" ? (
+          <div>
+            <div className="font-medium">Daily free audit limit reached.</div>
+            <div className="text-sm text-muted mt-1">
+              Your admin allowance resets at UTC midnight — no need to buy a credit.
+            </div>
+          </div>
         ) : (
           <div className="flex items-center justify-between">
             <div>

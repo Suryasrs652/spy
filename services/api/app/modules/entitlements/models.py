@@ -23,6 +23,15 @@ class EntitlementType(StrEnum):
     PURCHASED = "PURCHASED"
     SUBSCRIPTION = "SUBSCRIPTION"
     ADMIN_GRANT = "ADMIN_GRANT"
+    # A super admin's own standing daily free-audit allowance (dogfooding/
+    # ops convenience) — deliberately distinct from ADMIN_GRANT (a
+    # spend-down credit balance an admin grants to a *user*, counted in
+    # PAID_TYPES and reservable again while RELEASED with remaining>0).
+    # This type is never added to PAID_TYPES: it's a rolling per-UTC-day
+    # counter, not a balance, and colliding it with ADMIN_GRANT let a
+    # released (failed) daily-allowance row get silently "reserved" again
+    # by the paid-entitlement path, bypassing the daily cap entirely.
+    ADMIN_DAILY_FREE = "ADMIN_DAILY_FREE"
 
 
 class EntitlementStatus(StrEnum):
