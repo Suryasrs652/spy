@@ -111,6 +111,47 @@ auth, **don't expose this to the internet as-is.**
 
 ---
 
+## Driving it with Claude Code
+
+The repo ships agents and skills in `.claude/`, so an audit can be run and
+interpreted conversationally rather than by hand.
+
+Analysis runs as a pipeline: five specialists look at one dimension each, a
+validator checks their findings against the live site, and a report agent turns
+what survives into the deliverable.
+
+```
+                 ┌── seo-analyst ──────┐
+                 ├── aeo-analyst ──────┤
+  crawl ────────►├── geo-analyst ──────┤──► findings-validator ──► report-writer
+                 ├── crawl-analyst ────┤
+                 └── gsc-analyst ──────┘
+```
+
+The five analysts are independent and should be run in parallel. Nothing
+reaches the report without passing the validator — this scanner has produced
+false positives about real sites, and the validator exists specifically to
+catch them before a human acts on one.
+
+| Agent | Does |
+| --- | --- |
+| `seo-analyst` | Metadata, indexability, headings, content, images, links, security headers |
+| `aeo-analyst` | Schema coverage, heading hygiene, question coverage, authorship |
+| `geo-analyst` | Organization entity markup, field completeness, name consistency |
+| `crawl-analyst` | Page inventory, click depth, PageRank support, sitemap coverage |
+| `gsc-analyst` | Real Search Console performance and the opportunity engine |
+| `findings-validator` | Verifies every finding against the live site; sorts them confirmed / refuted / unverified |
+| `report-writer` | Writes the final report, ranked by leverage, and publishes it |
+| `rule-author` | Adds or fixes checks in the rule engine (development, not analysis) |
+
+Skills carry the domain knowledge each agent loads — `spy-audit` for operating
+the tool, one `*-signals` skill per dimension, plus `finding-validation` and
+`audit-reporting`. They are usable directly too: ask about `aeo-signals` without
+spawning an agent.
+
+Two rules run through all of them: **verify before claiming**, and **"not
+measured" is never "zero"**.
+
 ## Development
 
 ```bash
