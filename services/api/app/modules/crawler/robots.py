@@ -5,6 +5,7 @@ no second HTTP client.
 """
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from urllib.parse import urljoin
 
@@ -55,25 +56,50 @@ async def fetch_robots_policy(fetcher: SafeFetcher, *, origin: str, user_agent: 
     return RobotsPolicy(parser=parser, sitemap_urls=sitemaps, crawl_delay=delay, found=True)
 
 
+MAX_SITEMAP_DOCUMENTS = 12
+
+
 async def discover_sitemap_urls(
-    fetcher: SafeFetcher, *, origin: str, robots_sitemaps: list[str], max_urls: int
+    fetcher: SafeFetcher,
+    *,
+    origin: str,
+    robots_sitemaps: list[str],
+    max_urls: int,
+    max_documents: int = MAX_SITEMAP_DOCUMENTS,
 ) -> list[str]:
     """Best-effort sitemap discovery: robots.txt-declared sitemaps first,
-    falling back to the conventional /sitemap.xml path. Only plain
-    <urlset> sitemaps are parsed for M1 — a <sitemapindex> pointing at
-    further sitemaps is noted but not recursively expanded, to bound worst-
-    case fetch volume on a single audit.
+    falling back to the conventional /sitemap.xml path.
+
+    A <sitemapindex> is expanded into the sitemaps it points at, which is
+    how any site with per-language or per-section sitemaps publishes them
+    — treating the index as unparseable meant those sites looked like they
+    had no sitemap at all, and every page they did publish came back
+    `from_sitemap = False`.
+
+    Expansion is breadth-first and bounded two ways so a hostile or merely
+    enormous index can't turn one audit into thousands of fetches:
+    `max_documents` caps how many sitemap files are retrieved in total, and
+    `max_urls` caps the URLs returned. Already-seen sitemap URLs are
+    skipped, so an index that references itself terminates.
     """
     import lxml.etree as ET
 
-    candidates = robots_sitemaps or [urljoin(origin + "/", "sitemap.xml")]
+    queue: deque[str] = deque((robots_sitemaps or [urljoin(origin + "/", "sitemap.xml")])[:5])
+    seen: set[str] = set()
     urls: list[str] = []
+    documents_fetched = 0
 
-    for sitemap_url in candidates[:5]:
+    while queue and documents_fetched < max_documents and len(urls) < max_urls:
+        sitemap_url = queue.popleft()
+        if sitemap_url in seen:
+            continue
+        seen.add(sitemap_url)
+
         try:
             result = await fetcher.fetch(sitemap_url)
         except Exception:  # noqa: BLE001
             continue
+        documents_fetched += 1
         if result.response.status_code != 200:
             continue
         try:
@@ -81,14 +107,21 @@ async def discover_sitemap_urls(
         except ET.XMLSyntaxError:
             continue
 
-        tag = ET.QName(root).localname
-        if tag == "urlset":
-            for loc in root.iter():
-                if ET.QName(loc).localname == "loc" and loc.text:
-                    urls.append(loc.text.strip())
-                    if len(urls) >= max_urls:
-                        return urls
-        # sitemapindex: recording is out of scope for M1; the homepage BFS
-        # crawl still discovers the same pages via on-page links.
+        container = ET.QName(root).localname
+        if container not in ("urlset", "sitemapindex"):
+            continue
+
+        for element in root.iter():
+            if ET.QName(element).localname != "loc" or not element.text:
+                continue
+            loc = element.text.strip()
+            if not loc:
+                continue
+            if container == "urlset":
+                urls.append(loc)
+                if len(urls) >= max_urls:
+                    return urls
+            elif loc not in seen:
+                queue.append(loc)
 
     return urls

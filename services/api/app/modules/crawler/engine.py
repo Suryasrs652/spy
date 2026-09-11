@@ -17,6 +17,7 @@ import asyncio
 import time
 import uuid
 from dataclasses import dataclass, field
+from urllib.parse import urlsplit
 
 import structlog
 
@@ -34,6 +35,34 @@ MAX_CRAWL_DEPTH_HARD = 10
 FETCH_TIMEOUT_SECONDS = 15.0
 MAX_SCHEMA_BLOCKS_STORED = 10  # cap per page — enough for field-level checks without bloating the row
 MAX_EXTERNAL_LINKS_CHECKED = 25  # sampled, not exhaustive — bounds worst-case audit time
+
+# Media and binary assets get linked like pages but aren't documents: they
+# have no title, headings, schema or outbound links to contribute, and
+# fetching them means pulling whole video files through the crawler (a
+# single .mp4 took 1.9s on one real audit). They still appear in the link
+# graph — they're just never enqueued as pages to fetch and score.
+NON_DOCUMENT_EXTENSIONS = frozenset({
+    ".mp4", ".webm", ".mov", ".avi", ".mkv", ".m4v", ".mpg", ".mpeg",
+    ".mp3", ".wav", ".ogg", ".oga", ".m4a", ".flac", ".aac",
+    ".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".svg", ".ico", ".bmp", ".tiff",
+    ".pdf", ".zip", ".gz", ".tar", ".rar", ".7z", ".dmg", ".exe", ".msi", ".apk",
+    ".woff", ".woff2", ".ttf", ".otf", ".eot",
+    ".css", ".js", ".mjs", ".map", ".json", ".xml", ".rss", ".atom",
+    ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".csv",
+})
+
+
+def _is_document_url(url: str) -> bool:
+    """Extension-based, so it only ever skips URLs whose type is
+    unambiguous from the path — anything extensionless or dynamic still
+    gets fetched and decided on its real Content-Type.
+    """
+    path = urlsplit(url).path.lower()
+    dot = path.rfind(".")
+    if dot == -1 or "/" in path[dot:]:
+        return True
+    return path[dot:] not in NON_DOCUMENT_EXTENSIONS
+
 SECURITY_HEADER_NAMES = (
     "strict-transport-security", "x-content-type-options", "content-security-policy",
     "x-frame-options", "referrer-policy", "server", "set-cookie", "permissions-policy",
@@ -90,7 +119,7 @@ async def crawl_site(
     result = CrawlResult()
     visited: set[str] = set()
     page_id_by_url: dict[str, uuid.UUID] = {}
-    pending_links: list[tuple[str, str, "object"]] = []  # (source_url, target_url, ExtractedLink)
+    pending_links: list[tuple[str, str, object]] = []  # (source_url, target_url, ExtractedLink)
 
     try:
         policy = await fetch_robots_policy(fetcher, origin=origin, user_agent=settings.crawler_user_agent)
@@ -120,7 +149,7 @@ async def crawl_site(
                 n = normalize_url(u)
             except Exception:  # noqa: BLE001
                 continue
-            if n not in seen_frontier:
+            if n not in seen_frontier and _is_document_url(n):
                 seen_frontier.add(n)
                 frontier.append((n, 0))
 
@@ -145,7 +174,7 @@ async def crawl_site(
                 return_exceptions=True,
             )
 
-            for (url, depth), outcome in zip(batch, fetch_results):
+            for (url, depth), outcome in zip(batch, fetch_results, strict=False):
                 if isinstance(outcome, BlockedTargetError):
                     logger.warning("page_blocked", url=url, audit_id=str(audit_id))
                     continue
@@ -169,6 +198,7 @@ async def crawl_site(
                         pending_links.append((url, link.target_url, link))
                         if (
                             link.is_internal
+                            and _is_document_url(link.target_url)
                             and link.target_url not in visited
                             and link.target_url not in seen_frontier
                             and len(visited) + len(frontier) < max_urls

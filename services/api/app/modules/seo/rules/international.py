@@ -127,9 +127,18 @@ def conflicting_lang_declarations(ctx: RuleContext) -> RuleFinding | None:
             continue
         self_entries = [t for t in p.hreflang_tags if t.get("url") == p.normalized_url]
         for entry in self_entries:
-            declared = entry.get("lang", "").split("-")[0].lower()
+            raw = (entry.get("lang") or "").strip().lower()
+            # x-default is a fallback marker, not a language, and it
+            # legitimately points at a page that also declares its own
+            # language. It has to be skipped *before* the subtag split —
+            # splitting first leaves "x", which never equals "x-default",
+            # so the guard never fired and every page whose x-default
+            # correctly self-references was reported as conflicting.
+            if raw == "x-default":
+                continue
+            declared = raw.split("-")[0]
             actual = p.html_lang.split("-")[0].lower()
-            if declared and actual and declared != actual and declared != "x-default":
+            if declared and actual and declared != actual:
                 affected.append((p.id, {"url": p.url, "html_lang": p.html_lang, "hreflang_self": entry.get("lang")}))
     if not affected:
         return None

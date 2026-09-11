@@ -72,11 +72,20 @@ def dead_end_pages(ctx: RuleContext) -> RuleFinding | None:
     )
 
 
+# Statuses that actually mean "this target is gone". Everything else in
+# the 4xx/5xx range means our crawler was refused or the server had a bad
+# moment — 401/403/429/451 and Cloudflare/LinkedIn-style bot walls answer
+# automated clients differently from browsers, and a 5xx may be transient.
+# Reporting those as broken sends people to fix links that work fine for
+# their visitors, so we only claim what a single check can actually prove.
+_LINK_IS_GONE = frozenset({404, 410})
+
+
 @rule
 def broken_external_links(ctx: RuleContext) -> RuleFinding | None:
     by_page = defaultdict(list)
     for link in ctx.links:
-        if not link.is_internal and link.status_code and link.status_code >= 400 and link.source_page_id:
+        if not link.is_internal and link.status_code in _LINK_IS_GONE and link.source_page_id:
             by_page[link.source_page_id].append({"target": link.target_url, "status": link.status_code})
     page_by_id = {p.id: p for p in ctx.pages}
     affected = [
