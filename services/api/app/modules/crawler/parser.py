@@ -125,6 +125,11 @@ def parse_html(*, page_url: str, html: str, base_origin: str) -> ParsedPage:
     if html_el and html_el.get("lang"):
         result.html_lang = html_el["lang"].strip() or None
 
+    # JSON-LD lives in <script> tags, so it has to be read before the
+    # decompose() below removes them — it used to run after, which meant
+    # structured data was silently never detected on any site.
+    _extract_schema(soup, result)
+
     # Visible text word count (drop script/style/noscript content) — do this
     # AFTER the tag-based extraction above since it destructively removes
     # <script>/<style> nodes.
@@ -137,7 +142,6 @@ def parse_html(*, page_url: str, html: str, base_origin: str) -> ParsedPage:
     result.word_frequency_top_ratio = _top_word_ratio(words)
 
     _extract_images(soup, result)
-    _extract_schema(soup, result)
     result.links = _extract_links(soup, page_url=page_url, base_origin=base_origin)
     result.mixed_content = _has_mixed_content(soup, page_url)
     result.has_insecure_form_action = _has_insecure_form_action(soup, page_url)
@@ -314,7 +318,19 @@ def _extract_schema(soup: BeautifulSoup, result: ParsedPage) -> None:
             continue
         blocks = data if isinstance(data, list) else [data]
         for block in blocks:
-            if isinstance(block, dict):
+            if not isinstance(block, dict):
+                continue
+            # `@graph` is the standard container for "several entities in
+            # one script tag" and is what Yoast, RankMath and most
+            # hand-rolled implementations emit. The wrapper itself carries
+            # no @type, so treating it as a block made every @graph site
+            # read as having no structured data at all.
+            graph = block.get("@graph")
+            if isinstance(graph, list):
+                result.schema_blocks.extend(node for node in graph if isinstance(node, dict))
+                if "@type" in block:
+                    result.schema_blocks.append(block)
+            else:
                 result.schema_blocks.append(block)
 
 

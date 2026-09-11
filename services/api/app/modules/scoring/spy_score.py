@@ -24,6 +24,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass, field
 
+from app.core.schema_org import ORGANIZATION_TYPES
 from app.modules.crawler.models import CrawlPage, PageLink
 from app.modules.seo.rules import RuleFinding
 
@@ -92,16 +93,21 @@ def _performance_score(pages: list[CrawlPage]) -> float:
 _ORG_RICH_FIELDS = ("name", "url", "logo", "sameAs")
 
 
-def _schema_blocks_of_type(pages: list[CrawlPage], type_name: str):
+
+def _schema_blocks_of_type(pages: list[CrawlPage], type_name: str | frozenset[str]):
     """Yields (page, block) for every stored JSON-LD block declaring
     `type_name`, mirroring the @type-as-str-or-list handling the structured-
     data rules already use (app/modules/seo/rules/structured_data.py).
+
+    `type_name` may be a set, so a family of equivalent types (see
+    ORGANIZATION_TYPES) can be matched in one pass.
     """
+    wanted = {type_name} if isinstance(type_name, str) else type_name
     for p in pages:
         for block in p.schema_blocks or []:
             block_type = block.get("@type")
             types = block_type if isinstance(block_type, list) else [block_type]
-            if type_name in types:
+            if wanted.intersection(types):
                 yield p, block
 
 
@@ -165,7 +171,7 @@ def _aeo_score(pages: list[CrawlPage]) -> tuple[float, dict]:
 
 
 def _org_field_completeness_pct(pages: list[CrawlPage]) -> float | None:
-    orgs = list(_schema_blocks_of_type(pages, "Organization"))
+    orgs = list(_schema_blocks_of_type(pages, ORGANIZATION_TYPES))
     if not orgs:
         return None
     total_fields = len(_ORG_RICH_FIELDS) * len(orgs)
@@ -174,7 +180,7 @@ def _org_field_completeness_pct(pages: list[CrawlPage]) -> float | None:
 
 
 def _entity_name_consistency_pct(pages: list[CrawlPage]) -> float | None:
-    names = {block["name"] for _p, block in _schema_blocks_of_type(pages, "Organization") if block.get("name")}
+    names = {block["name"] for _p, block in _schema_blocks_of_type(pages, ORGANIZATION_TYPES) if block.get("name")}
     if not names:
         return None
     return 100.0 if len(names) == 1 else 0.0
@@ -214,7 +220,7 @@ def _geo_score(pages: list[CrawlPage], links: list[PageLink] | None = None) -> t
     if not indexable:
         return 0.0, {"reason": "no indexable pages"}
 
-    has_org_schema = any("Organization" in (p.schema_types or []) for p in pages)
+    has_org_schema = any(ORGANIZATION_TYPES.intersection(p.schema_types or []) for p in pages)
     schema_coverage_pct = 100 * sum(1 for p in indexable if p.has_schema) / len(indexable)
     org_completeness_pct = _org_field_completeness_pct(pages)
     entity_consistency_pct = _entity_name_consistency_pct(pages)

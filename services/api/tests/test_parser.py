@@ -70,3 +70,29 @@ def test_author_byline_via_rel_author_link() -> None:
 def test_no_byline_signal_present() -> None:
     result = _parse("<p>Just some ordinary paragraph text with no authorship markup.</p>")
     assert result.has_author_byline is False
+
+
+def test_json_ld_graph_container_is_unwrapped() -> None:
+    """`@graph` is how most real sites (Yoast, RankMath, hand-rolled) emit
+    several entities from one script tag. The wrapper has no @type of its
+    own, so treating it as a single block made every such site report zero
+    structured data — and dragged its AEO/GEO scores down with it.
+    """
+    body = """
+    <script type="application/ld+json">
+    {"@context":"https://schema.org","@graph":[
+      {"@type":"ProfessionalService","name":"Studio"},
+      {"@type":"WebSite","name":"Site"},
+      {"@type":"FAQPage"}
+    ]}
+    </script>
+    """
+    result = _parse(body)
+    types = [b.get("@type") for b in result.schema_blocks]
+    assert types == ["ProfessionalService", "WebSite", "FAQPage"]
+
+
+def test_plain_json_ld_object_still_parses() -> None:
+    body = '<script type="application/ld+json">{"@type":"Organization","name":"X"}</script>'
+    result = _parse(body)
+    assert [b.get("@type") for b in result.schema_blocks] == ["Organization"]

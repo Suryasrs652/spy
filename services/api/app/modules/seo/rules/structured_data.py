@@ -1,6 +1,7 @@
 """§23 Structured Data rules."""
 from __future__ import annotations
 
+from app.core.schema_org import ORGANIZATION_TYPES
 from app.modules.seo.models import Severity
 from app.modules.seo.rules.base import RuleContext, RuleFinding, rule
 
@@ -40,7 +41,7 @@ def no_structured_data(ctx: RuleContext) -> RuleFinding | None:
 @rule
 def missing_organization_schema(ctx: RuleContext) -> RuleFinding | None:
     crawled = ctx.crawled()
-    has_org = any("Organization" in (p.schema_types or []) for p in crawled)
+    has_org = any(ORGANIZATION_TYPES.intersection(p.schema_types or []) for p in crawled)
     if has_org or not crawled:
         return None
     homepage = min(crawled, key=lambda p: p.crawl_depth)
@@ -62,7 +63,7 @@ def organization_schema_missing_fields(ctx: RuleContext) -> RuleFinding | None:
         for block in p.schema_blocks or []:
             block_type = block.get("@type")
             types = block_type if isinstance(block_type, list) else [block_type]
-            if "Organization" in types:
+            if ORGANIZATION_TYPES.intersection(types):
                 missing = [f for f in required if not block.get(f)]
                 if missing:
                     affected.append((p.id, {"url": p.url, "missing_fields": missing}))
@@ -120,7 +121,7 @@ def conflicting_organization_names(ctx: RuleContext) -> RuleFinding | None:
         for block in p.schema_blocks or []:
             block_type = block.get("@type")
             types = block_type if isinstance(block_type, list) else [block_type]
-            if "Organization" in types and block.get("name"):
+            if ORGANIZATION_TYPES.intersection(types) and block.get("name"):
                 names_seen.setdefault(block["name"], []).append(p)
     distinct_names = list(names_seen.keys())
     if len(distinct_names) < 2:
