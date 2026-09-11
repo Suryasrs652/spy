@@ -1,44 +1,143 @@
 """Shared test fixtures.
 
 These tests run against a real Postgres + Redis (the docker-compose
-services), not mocks — the release-blocking tests in particular (§118-§123)
-are exactly the tests where a mocked DB would hide the bugs they exist to
-catch (the partial-unique-index race, the webhook-uniqueness race). Run them
-with:
+services), not mocks — the release-blocking tests in particular are
+exactly the tests where a mocked DB would hide the bugs they exist to
+catch. Run them with:
 
     docker compose exec api pytest -q
 
-Known limitation: this does not yet provision an isolated `spy_test`
-database — tests run against whatever DATABASE_URL is configured and rely
-on randomized unique identifiers (email/domain per test) rather than a
-pristine schema per run. Isolating onto a dedicated test database is
-tracked as a follow-up, not implemented here.
+The suite provisions and migrates its own database (`spy_test` by
+default, override with TEST_DATABASE_NAME) and drops it at the start of
+every run, so it never touches the development database. That isolation
+is load-bearing rather than tidiness: `_reset_between_tests` below
+truncates tables between test functions, and pointed at the dev database
+that silently deleted real projects and their audits.
 """
 from __future__ import annotations
 
 import os
+from urllib.parse import urlsplit, urlunsplit
 
-# Must be set before the first `from app...` import anywhere in the test
-# process: app.db.session builds its engine at import time from
-# get_settings() (lru_cache'd), and pytest-asyncio's function-scoped event
-# loops mean SQLAlchemy's default pool would otherwise hold asyncpg
-# connections bound to a loop that's already been torn down by the time the
-# next test runs ("Future attached to a different loop"). NullPool opens a
-# fresh connection per checkout instead of reusing one across loops. See
-# app/core/config.py:use_null_pool and app/db/session.py.
+# Everything in this block must happen before the first `from app...`
+# import anywhere in the test process, because app.db.session builds its
+# engine at import time from get_settings(), which is lru_cache'd.
+
+# pytest-asyncio gives each test a fresh, function-scoped event loop, and
+# asyncpg connections are bound to the loop that opened them — SQLAlchemy's
+# default pool would hand the next test a connection whose loop is already
+# closed ("Future attached to a different loop"). NullPool opens a fresh
+# connection per checkout instead. See app/core/config.py:use_null_pool.
 os.environ.setdefault("USE_NULL_POOL", "true")
 
-import asyncio
-import uuid
-from collections.abc import AsyncGenerator
+TEST_DATABASE_NAME = os.environ.get("TEST_DATABASE_NAME", "spy_test")
 
-import pytest
-import pytest_asyncio
-from httpx import ASGITransport, AsyncClient
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.db.session import AsyncSessionLocal
-from app.main import app
+def _with_database(url: str, name: str) -> str:
+    parts = urlsplit(url)
+    return urlunsplit((parts.scheme, parts.netloc, f"/{name}", parts.query, parts.fragment))
+
+
+def _redirect_to_test_database() -> tuple[str, str]:
+    """Point both DB URLs at the test database, returning the *admin* URLs
+    (pointed at the `postgres` maintenance database) needed to create and
+    drop it.
+
+    Refuses if the test database would be the application's own, because
+    provisioning DROPs it — and TEST_DATABASE_NAME is an override a person
+    can set. Comparing the name against the configured application
+    database is the only check that actually protects anything; comparing
+    it against itself after redirection always passes.
+    """
+    from app.core.config import get_settings
+
+    settings = get_settings()
+    async_url, sync_url = settings.database_url, settings.database_url_sync
+    app_database = urlsplit(async_url).path.lstrip("/")
+
+    if app_database == TEST_DATABASE_NAME:
+        raise RuntimeError(
+            f"Refusing to run: TEST_DATABASE_NAME is {TEST_DATABASE_NAME!r}, which is the "
+            f"application's own database. Provisioning DROPs the test database and the suite "
+            f"truncates tables between tests, so this would destroy real data."
+        )
+
+    os.environ["DATABASE_URL"] = _with_database(async_url, TEST_DATABASE_NAME)
+    os.environ["DATABASE_URL_SYNC"] = _with_database(sync_url, TEST_DATABASE_NAME)
+    get_settings.cache_clear()  # so every later reader sees the test URLs
+
+    return _with_database(sync_url, "postgres"), _with_database(sync_url, TEST_DATABASE_NAME)
+
+
+_ADMIN_URL, _TEST_SYNC_URL = _redirect_to_test_database()
+
+
+def _provision_test_database() -> None:
+    """Drop and recreate the test database, then migrate it.
+
+    Recreating per run rather than reusing means a failed run can't leave
+    state that makes the next one pass (or fail) for the wrong reason. The
+    schema comes from `alembic upgrade head` rather than
+    `Base.metadata.create_all` specifically because the migrations also
+    seed rule_config and feature_flags, which the rule engine reads — a
+    create_all schema would be structurally right and behaviourally empty.
+    """
+    from sqlalchemy import create_engine, text
+
+    from alembic import command
+    from alembic.config import Config
+
+    admin = create_engine(_ADMIN_URL, isolation_level="AUTOCOMMIT", future=True)
+    with admin.connect() as conn:
+        # Terminate stragglers from a previous interrupted run, or DROP blocks.
+        conn.execute(
+            text(
+                "SELECT pg_terminate_backend(pid) FROM pg_stat_activity "
+                "WHERE datname = :name AND pid <> pg_backend_pid()"
+            ),
+            {"name": TEST_DATABASE_NAME},
+        )
+        conn.execute(text(f'DROP DATABASE IF EXISTS "{TEST_DATABASE_NAME}"'))
+        conn.execute(text(f'CREATE DATABASE "{TEST_DATABASE_NAME}"'))
+    admin.dispose()
+
+    alembic_cfg = Config(os.path.join(os.path.dirname(os.path.dirname(__file__)), "alembic.ini"))
+    alembic_cfg.set_main_option("script_location", os.path.join(os.path.dirname(os.path.dirname(__file__)), "alembic"))
+    alembic_cfg.set_main_option("sqlalchemy.url", _TEST_SYNC_URL)
+    command.upgrade(alembic_cfg, "head")
+
+
+_provision_test_database()
+
+# E402 throughout: these imports are deliberately below the block above.
+# app.db.session builds its engine at import time, so the DB URLs have to
+# be redirected — and the database provisioned — before anything under
+# `app.` is imported. Moving them to the top silently reintroduces the bug
+# this file exists to prevent.
+import asyncio  # noqa: E402
+import uuid  # noqa: E402
+from collections.abc import AsyncGenerator  # noqa: E402
+
+import pytest  # noqa: E402
+import pytest_asyncio  # noqa: E402
+from httpx import ASGITransport, AsyncClient  # noqa: E402
+from sqlalchemy.ext.asyncio import AsyncSession  # noqa: E402
+
+from app.db.session import AsyncSessionLocal, engine  # noqa: E402
+from app.main import app  # noqa: E402
+
+# Aborts the run rather than letting it delete a real database.
+# `_reset_between_tests` truncates tables, so if the redirection above
+# ever silently stops working, this is the difference between a failed
+# import and a destroyed development database. Deliberately a module-level
+# assertion and not a test function: pytest does not collect tests from
+# conftest.py, and this has to fire before any fixture runs.
+if engine.url.database != TEST_DATABASE_NAME:
+    raise RuntimeError(
+        f"Refusing to run: tests are pointed at database {engine.url.database!r}, "
+        f"not {TEST_DATABASE_NAME!r}. The test suite truncates tables between tests, "
+        f"so running against anything else would destroy real data."
+    )
 
 
 @pytest_asyncio.fixture(autouse=True)
@@ -76,10 +175,15 @@ async def _reset_between_tests() -> AsyncGenerator[None, None]:
     # same real domain. Clearing projects between tests restores the
     # isolation the per-test org used to provide; audits, crawl pages,
     # issues and reports all cascade from the project row.
-    # Notifications are user-scoped rather than project-scoped, so they
-    # don't cascade with the projects below — and with one shared user,
-    # a previous test's rows would otherwise show up in the next test's
-    # unread counts.
+    # Every test shares the one local workspace, so rows have to be
+    # cleared between them: project uniqueness is (organization_id,
+    # canonical_origin) (§63), and two tests auditing the same domain
+    # would collide. Notifications are user-scoped rather than
+    # project-scoped, so they don't cascade with the projects and need
+    # clearing separately or they leak into the next test's unread counts.
+    #
+    # Safe only because this is a dedicated test database — see the
+    # provisioning block and test_database_guard at the top of this file.
     from sqlalchemy import delete
 
     from app.db.session import AsyncSessionLocal
@@ -162,7 +266,6 @@ def inline_audit_task(monkeypatch):
     `wait_for_audit_terminal` below, exactly as a real client would poll
     `GET /audits/{id}/progress`.
     """
-    import asyncio
 
     from app.workers.tasks import crawl as crawl_task_module
 
@@ -177,10 +280,10 @@ async def wait_for_audit_terminal(db: AsyncSession, audit_id, *, timeout: float 
     """Poll the DB until the audit reaches a terminal status — the test
     equivalent of a client polling `GET /audits/{id}/progress`.
     """
-    import asyncio
 
-    from app.modules.audits.models import Audit, TERMINAL_STATUSES
     from sqlalchemy import select
+
+    from app.modules.audits.models import TERMINAL_STATUSES, Audit
 
     terminal = {s.value for s in TERMINAL_STATUSES}
     elapsed = 0.0
