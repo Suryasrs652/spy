@@ -230,6 +230,14 @@ def _extract_images(soup: BeautifulSoup, result: ParsedPage) -> None:
     for img in soup.find_all("img"):
         result.images_total += 1
         alt = img.get("alt")
+        # An explicitly decorative image is *supposed* to carry alt="" —
+        # WCAG asks for exactly that so screen readers skip it. Counting it
+        # as a missing alt tells authors to describe images that should stay
+        # silent, which is actively worse for the people alt text exists
+        # for. Only the explicit markers count; a bare alt="" is still
+        # ambiguous enough to flag.
+        if img.get("aria-hidden") == "true" or img.get("role") == "presentation":
+            continue
         if alt is None or not alt.strip():
             result.images_missing_alt += 1
         elif _GENERIC_ALT_RE.match(alt.strip()):

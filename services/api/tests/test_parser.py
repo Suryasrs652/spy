@@ -96,3 +96,20 @@ def test_plain_json_ld_object_still_parses() -> None:
     body = '<script type="application/ld+json">{"@type":"Organization","name":"X"}</script>'
     result = _parse(body)
     assert [b.get("@type") for b in result.schema_blocks] == ["Organization"]
+
+
+def test_decorative_images_are_not_counted_as_missing_alt() -> None:
+    """WCAG asks for alt="" on decorative images so screen readers skip
+    them. Counting that as a missing alt pushes authors to describe images
+    that should stay silent — worse for the people alt text is for.
+    """
+    body = (
+        '<img src="a.png" alt="A described photograph">'
+        '<img src="spacer.png" alt="" aria-hidden="true">'
+        '<img src="flourish.png" alt="" role="presentation">'
+        '<img src="logo.png" alt="">'          # ambiguous — still flagged
+        '<img src="nope.png">'                  # no alt at all — flagged
+    )
+    result = _parse(body)
+    assert result.images_total == 5
+    assert result.images_missing_alt == 2
