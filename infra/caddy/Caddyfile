@@ -1,0 +1,35 @@
+# TLS termination + routing for the single-VPS stack
+# (docker-compose.prod.yml). Caddy obtains and renews Let's Encrypt certs
+# automatically for each hostname below, so every hostname must already
+# have a DNS A/AAAA record pointing at this box before `up -d`.
+
+{$API_HOSTNAME} {
+	reverse_proxy api:8000 {
+		# app/core/ratelimit.py's client_ip() reads the FIRST entry of
+		# X-Forwarded-For. Caddy *appends* by default, which would let a
+		# client send their own X-Forwarded-For and land in a rate-limit
+		# bucket of their choosing — so overwrite it with the real peer
+		# address instead. This is the precondition DEPLOYMENT.md names
+		# for setting TRUST_PROXY_HEADERS=true.
+		header_up X-Forwarded-For {remote_host}
+	}
+}
+
+{$STORAGE_HOSTNAME} {
+	# Serves presigned report downloads (§108) straight from MinIO. The
+	# signatures are computed for this hostname via MINIO_SERVER_URL, so
+	# this name must match STORAGE_PUBLIC_ENDPOINT exactly.
+	reverse_proxy minio:9000 {
+		header_up X-Forwarded-For {remote_host}
+	}
+}
+
+# Only reachable when the `fullstack` profile runs the Next.js app on this
+# box too. Left as `localhost` when WEB_HOSTNAME is unset so Caddy still
+# loads a valid config (and never tries to issue a public cert) while the
+# frontend lives on Vercel.
+{$WEB_HOSTNAME:localhost} {
+	reverse_proxy web:3000 {
+		header_up X-Forwarded-For {remote_host}
+	}
+}

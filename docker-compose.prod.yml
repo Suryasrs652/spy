@@ -1,0 +1,149 @@
+name: spy-prod
+
+# Single-VPS production stack (§116). Everything runs on one box; Caddy is
+# the only service with published ports and terminates TLS (Let's Encrypt)
+# for the api/storage/web hostnames in infra/caddy/Caddyfile.
+#
+#   docker compose -f docker-compose.prod.yml up -d --build
+#
+# Add `--profile fullstack` to also run the Next.js app here instead of on
+# Vercel. Backend-only is the default: the frontend is deployed separately
+# and reaches this box over the public API hostname.
+#
+# Unlike docker-compose.yml (local dev), nothing here bind-mounts source,
+# every app image is built `--target production` (non-root, no --reload),
+# and postgres/redis/minio publish no host ports — they are reachable only
+# on this compose network.
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    # Redis holds the crawl frontier and Celery's broker/result backend —
+    # persist it so an in-flight audit survives a host reboot.
+    command: redis-server --save 60 1 --appendonly yes
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    restart: unless-stopped
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${STORAGE_ACCESS_KEY}
+      MINIO_ROOT_PASSWORD: ${STORAGE_SECRET_KEY}
+      # Presigned report URLs (§108) are handed to the user's browser, so
+      # they must be signed for the public hostname Caddy serves, not the
+      # internal one the api uses to upload.
+      MINIO_SERVER_URL: ${STORAGE_PUBLIC_ENDPOINT}
+    volumes:
+      - miniodata:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ./services/api
+      dockerfile: ../../infra/docker/Dockerfile.api
+      target: production
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      RUN_MODE: api
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/health/ready"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  worker:
+    build:
+      context: ./services/api
+      dockerfile: ../../infra/docker/Dockerfile.api
+      target: production
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      RUN_MODE: worker
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+      minio: {condition: service_healthy}
+
+  beat:
+    build:
+      context: ./services/api
+      dockerfile: ../../infra/docker/Dockerfile.api
+      target: production
+    restart: unless-stopped
+    env_file: .env.production
+    environment:
+      RUN_MODE: beat
+    # Exactly one beat process may run at a time (a second one double-fires
+    # every scheduled task) — never scale this service past 1 replica.
+    depends_on:
+      postgres: {condition: service_healthy}
+      redis: {condition: service_healthy}
+
+  web:
+    profiles: ["fullstack"]
+    build:
+      context: ./apps/web
+      dockerfile: ../../infra/docker/Dockerfile.web
+      target: production
+    restart: unless-stopped
+    env_file: .env.production
+    depends_on:
+      - api
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      API_HOSTNAME: ${API_HOSTNAME}
+      STORAGE_HOSTNAME: ${STORAGE_HOSTNAME}
+      WEB_HOSTNAME: ${WEB_HOSTNAME:-}
+    volumes:
+      - ./infra/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddydata:/data
+      - caddyconfig:/config
+    depends_on:
+      - api
+
+volumes:
+  pgdata:
+  redisdata:
+  miniodata:
+  caddydata:
+  caddyconfig:
