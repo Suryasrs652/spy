@@ -19,7 +19,6 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # a comment, per §104.
 _INSECURE_DEFAULTS = {
     "auth_secret": "insecure-dev-secret-change-me",
-    "internal_service_token": "insecure-dev-internal-token",
     "token_encryption_key": "0" * 43 + "=",
 }
 
@@ -89,7 +88,6 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     access_token_ttl_minutes: int = 15
     refresh_token_ttl_days: int = 30
-    internal_service_token: str = "insecure-dev-internal-token"
 
     # Google OAuth
     google_client_id: str = ""
@@ -97,9 +95,6 @@ class Settings(BaseSettings):
     google_gsc_redirect_uri: str = "http://localhost:8000/api/v1/integrations/gsc/callback"
 
     # Razorpay
-    razorpay_key_id: str = ""
-    razorpay_key_secret: str = ""
-    razorpay_webhook_secret: str = ""
 
     # Storage
     storage_endpoint: str = "http://localhost:9000"

@@ -15,8 +15,7 @@ actually runs" at the bottom.
   Build with `--target production`; `docker-compose.yml` explicitly
   targets `dev` so local development is unaffected.
 - **A production secrets guard**: `Settings` refuses to start when
-  `ENVIRONMENT=production` and `AUTH_SECRET`/`INTERNAL_SERVICE_TOKEN`/
-  `TOKEN_ENCRYPTION_KEY` still hold their shipped placeholder values
+  `ENVIRONMENT=production` and `AUTH_SECRET`/`TOKEN_ENCRYPTION_KEY` still hold their shipped placeholder values
   (`app/core/config.py`). A misconfigured deploy fails at boot, not
   silently in production.
 - **CI** (`.github/workflows/ci.yml`): tests, migrations, lint, type-check,
@@ -34,16 +33,16 @@ actually runs" at the bottom.
 ## Before the first deploy to a given environment
 
 1. **Generate real secrets** — never reuse the values in `.env.example`:
-   - `AUTH_SECRET` / `NEXTAUTH_SECRET`: 32+ random bytes (`openssl rand -base64 32`). These are conceptually the same secret (Auth.js's JWT and FastAPI's JWT) but are separate config keys — set both.
-   - `INTERNAL_SERVICE_TOKEN`: 32+ random bytes, shared only between the web and api services.
-   - `TOKEN_ENCRYPTION_KEY`: a Fernet key — `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`.
-   - `RAZORPAY_KEY_ID`/`RAZORPAY_KEY_SECRET`/`RAZORPAY_WEBHOOK_SECRET`, `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`: from those providers' real (not test-mode, for production) consoles.
-   - Store these in whatever secrets manager the host provides — never in a committed file. `ENVIRONMENT=production` will refuse to boot if the three checked ones are still placeholders (see above), but that check can't see the payment/OAuth secrets, so review `.env.example` line by line.
+   - `AUTH_SECRET`: 32+ random bytes (`openssl rand -base64 32`). Signs the Google Search Console OAuth `state` parameter — the only JWT left now that there is no sign-in.
+   - `TOKEN_ENCRYPTION_KEY`: a Fernet key — `python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`. Encrypts stored Google refresh tokens.
+   - `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET`: from Google Cloud Console, and only if you want Search Console connected at all.
+   - Store these in whatever secrets manager the host provides — never in a committed file. `ENVIRONMENT=production` refuses to boot while the checked ones are still placeholders (see above).
 2. **Point at real infrastructure**: managed Postgres, managed Redis, and an S3-compatible bucket (or real MinIO) reachable from wherever the api/worker/beat processes run. Set `DATABASE_URL`/`DATABASE_URL_SYNC`/`REDIS_URL`/`CELERY_BROKER_URL`/`CELERY_RESULT_BACKEND`/`STORAGE_*` accordingly.
 3. **Size the DB connection pool** (`DB_POOL_SIZE`/`DB_MAX_OVERFLOW`, `app/core/config.py`) against the managed Postgres's actual `max_connections` and how many processes (api replicas × worker replicas × beat) will share it — see `services/api/loadtest/README.md` finding #2 for why this matters and what the default assumes.
 4. **Set `TRUST_PROXY_HEADERS=true`** only if a real reverse proxy/load balancer sits in front and is configured to strip any client-supplied `X-Forwarded-For` before setting its own — otherwise leave it `false` (the default); see `app/core/ratelimit.py`.
-5. **DNS + TLS**: `WEB_BASE_URL`/`NEXTAUTH_URL`/`API_BASE_URL`/`GOOGLE_GSC_REDIRECT_UI` all need to point at real hostnames with valid certificates (Google OAuth and Razorpay webhooks both require HTTPS in production).
-6. **Update the OAuth/webhook consoles**: Google Cloud Console's authorized redirect URIs and Razorpay's webhook URL both need the real production hostnames — done outside this repo, in each provider's dashboard.
+5. **DNS + TLS**: `WEB_BASE_URL`/`API_BASE_URL`/`GOOGLE_GSC_REDIRECT_URI` all need to point at real hostnames with valid certificates (Google OAuth requires HTTPS).
+6. **Update the OAuth console**: Google Cloud Console's authorized redirect URIs need the real production hostname — done outside this repo, in Google's dashboard.
+7. **Put authentication in front of it.** Spy has none: every request resolves to one local workspace (`app/core/local_workspace.py`). Anything deployed where others can reach it needs a proxy-level gate — SSO, basic auth, an IP allowlist, a private network — or anyone who finds the hostname can crawl arbitrary sites from your infrastructure.
 
 ## Deploying
 
@@ -67,8 +66,8 @@ actually runs" at the bottom.
 ## Verifying a deploy
 
 - `curl https://<api-host>/health/ready` → `{"status": "ok", ...}` with every check `"ok"`.
-- Sign up a real (or disposable) account through the actual web UI, verify the free-audit entitlement is granted, run one audit against a real small site end to end.
-- Check `GET /api/v1/admin/queue` (as a super admin — set `is_super_admin` on one user's row directly in the DB after the first deploy; there is no signup-time way to grant it, deliberately) for `stuck_jobs` — should be empty on a clean start.
+- Add a project through the actual web UI and run one audit against a real small site end to end.
+- Check `GET /api/v1/admin/queue` for `stuck_jobs` — should be empty on a clean start.
 - Tail api/worker logs for the first few minutes for anything unexpected.
 
 ## Rolling back

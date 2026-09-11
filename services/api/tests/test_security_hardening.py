@@ -49,7 +49,6 @@ def test_production_settings_reject_default_auth_secret() -> None:
         Settings(
             environment="production",
             auth_secret="insecure-dev-secret-change-me",
-            internal_service_token="a-real-token-value",
             token_encryption_key="a-real-fernet-key-not-the-shipped-default==",
         )
 
@@ -58,7 +57,6 @@ def test_production_settings_accept_real_secrets() -> None:
     settings = Settings(
         environment="production",
         auth_secret="a-real-random-secret-value",
-        internal_service_token="a-real-token-value",
         token_encryption_key="a-real-fernet-key-not-the-shipped-default==",
     )
     assert settings.is_production
