@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { serverApiGet } from "@/lib/serverApi";
-import type { Audit, EntitlementStatus, Project } from "@/lib/api";
+import type { Audit, Project } from "@/lib/api";
 import { RunAuditButton } from "./RunAuditButton";
 
 const SEVERITY_BAND: Record<string, string> = {
@@ -9,10 +9,9 @@ const SEVERITY_BAND: Record<string, string> = {
 
 export default async function ProjectDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const [project, audits, entitlement] = await Promise.all([
+  const [project, audits] = await Promise.all([
     serverApiGet<Project>(`projects/${id}`),
     serverApiGet<Audit[]>(`projects/${id}/audits`),
-    serverApiGet<EntitlementStatus>("entitlements/audit"),
   ]);
 
   if (!project) {
@@ -26,7 +25,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <h1 className="text-2xl font-semibold">{project.name}</h1>
           <p className="text-muted text-sm mt-1">{project.canonical_origin}</p>
         </div>
-        <RunAuditButton projectId={project.id} canRun={!!entitlement?.can_run} reason={entitlement?.reason ?? null} />
+        <RunAuditButton projectId={project.id} />
       </div>
 
       <div className="flex flex-wrap gap-x-4 gap-y-2 mt-6 text-sm">

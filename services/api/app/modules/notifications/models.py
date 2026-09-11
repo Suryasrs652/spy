@@ -23,8 +23,6 @@ from app.db.base import Base, UUIDPKMixin, utcnow
 class NotificationType(StrEnum):
     AUDIT_COMPLETED = "AUDIT_COMPLETED"
     AUDIT_FAILED = "AUDIT_FAILED"
-    PURCHASE_SUCCEEDED = "PURCHASE_SUCCEEDED"
-    PURCHASE_FAILED = "PURCHASE_FAILED"
 
 
 class Notification(UUIDPKMixin, Base):

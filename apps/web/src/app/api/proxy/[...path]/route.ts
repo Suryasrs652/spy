@@ -1,30 +1,19 @@
 /**
  * BFF proxy: the browser calls only this same-origin route, never FastAPI
- * directly. It attaches the httpOnly-cookie-derived session's FastAPI
- * access token + organization id server-side, so the access token never
- * reaches client-side JavaScript.
+ * directly, so the API container needs no public exposure. Spy is
+ * self-hosted and single-user, so there's no session to attach — the API
+ * resolves every request to the one local workspace.
  */
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@/lib/auth";
 
 const API_BASE_URL = process.env.API_BASE_URL ?? "http://api:8000";
 
 async function handle(req: NextRequest, path: string[]): Promise<NextResponse> {
-  const session = await auth();
-  if (!session?.accessToken) {
-    return NextResponse.json(
-      { error: { code: "UNAUTHENTICATED", message: "Not signed in.", request_id: "" } },
-      { status: 401 },
-    );
-  }
-
   const targetPath = path.join("/");
   const search = req.nextUrl.search;
   const targetUrl = `${API_BASE_URL}/api/v1/${targetPath}${search}`;
 
   const headers = new Headers();
-  headers.set("Authorization", `Bearer ${session.accessToken}`);
-  headers.set("X-Organization-Id", session.organizationId);
   const contentType = req.headers.get("content-type");
   if (contentType) headers.set("Content-Type", contentType);
   const idempotencyKey = req.headers.get("idempotency-key");

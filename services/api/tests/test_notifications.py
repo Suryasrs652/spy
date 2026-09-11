@@ -1,8 +1,11 @@
 """§134 notifications — in-app inbox + best-effort email delivery, against
-real Postgres. Email delivery itself (MailHog) is exercised for real by
-existing auth-flow tests (signup/verify/reset all call send_email); these
-tests focus on the notification row lifecycle and the audit/billing hooks
-that create one.
+real Postgres. These tests focus on the notification row lifecycle and
+the audit hooks that create one.
+
+There is only one real user now (Spy is self-hosted and single-user), but
+`list_notifications`/`mark_read` still filter by user_id, so the scoping
+tests below create a second bare User row directly to prove that filter
+is real rather than incidental.
 """
 from __future__ import annotations
 
@@ -79,15 +82,22 @@ async def test_mark_all_read(db, verified_user):
     assert await mark_all_read(db, user_id=user.id) == 0
 
 
+async def _make_other_user(db):
+    """A second user row, straight through the model — there is no signup
+    flow to go through any more."""
+    from app.modules.auth.models import User
+
+    other = User(email=unique_email())
+    db.add(other)
+    await db.commit()
+    await db.refresh(other)
+    return other
+
+
 @pytest.mark.asyncio
 async def test_notifications_are_scoped_to_the_owning_user(db, verified_user):
     user_a, org_a, _ = verified_user
-
-    from app.modules.auth import service as auth_service
-
-    user_b, org_b = await auth_service.signup(
-        db, email=unique_email(), password="correct horse battery staple", name=None
-    )
+    user_b = await _make_other_user(db)
 
     await create_notification(
         db, user_id=user_a.id, organization_id=org_a, type=NotificationType.AUDIT_COMPLETED,
@@ -101,12 +111,9 @@ async def test_notifications_are_scoped_to_the_owning_user(db, verified_user):
 @pytest.mark.asyncio
 async def test_mark_read_rejects_another_users_notification(db, verified_user):
     from app.core.errors import NotFoundError
-    from app.modules.auth import service as auth_service
 
     user_a, org_a, _ = verified_user
-    user_b, _org_b = await auth_service.signup(
-        db, email=unique_email(), password="correct horse battery staple", name=None
-    )
+    user_b = await _make_other_user(db)
 
     notification = await create_notification(
         db, user_id=user_a.id, organization_id=org_a, type=NotificationType.AUDIT_COMPLETED,
@@ -118,31 +125,16 @@ async def test_mark_read_rejects_another_users_notification(db, verified_user):
 
 
 @pytest.mark.asyncio
-async def test_full_commercial_loop_creates_audit_completed_notification(client, db, auth_headers):
+async def test_audit_run_creates_audit_completed_notification(client, db, auth_headers, verified_user):
     """Integration check that the crawl pipeline's success path actually
     calls notify_audit_completed (app/workers/tasks/crawl.py) end to end,
     not just that the service function works in isolation.
     """
-    from datetime import datetime, timezone
-
-    from app.core.security import issue_access_token
     from app.modules.audits.models import AuditStatus
-    from app.modules.auth.models import User
     from tests.conftest import wait_for_audit_terminal
 
-    email = unique_email()
-    signup_resp = await client.post(
-        "/api/v1/auth/signup", json={"email": email, "password": "correct horse battery staple"}
-    )
-    assert signup_resp.status_code == 201
-    org_id = signup_resp.json()["organization_id"]
-    user_id = signup_resp.json()["user_id"]
-
-    user = (await db.execute(select(User).where(User.id == uuid.UUID(user_id)))).scalar_one()
-    user.email_verified_at = datetime.now(timezone.utc)
-    await db.commit()
-
-    token = issue_access_token(user_id, org_id)
+    user, org_id, token = verified_user
+    user_id = user.id
     headers = auth_headers(token, org_id)
 
     project_resp = await client.post(
@@ -157,7 +149,7 @@ async def test_full_commercial_loop_creates_audit_completed_notification(client,
     assert audit.status == AuditStatus.COMPLETED.value
 
     notifications = (
-        await db.execute(select(Notification).where(Notification.user_id == uuid.UUID(user_id)))
+        await db.execute(select(Notification).where(Notification.user_id == user_id))
     ).scalars().all()
     assert any(n.type == NotificationType.AUDIT_COMPLETED.value for n in notifications)
 

@@ -65,11 +65,6 @@ async def overview(db: AsyncSession = Depends(get_db)) -> dict:
     }
 
 
-@router.get("/revenue")
-async def revenue(days: int = 30, db: AsyncSession = Depends(get_db)) -> dict:
-    return await service.get_revenue_summary(db, days=days)
-
-
 @router.get("/queue")
 async def queue_health(db: AsyncSession = Depends(get_db)) -> dict:
     return await service.get_queue_health(db)

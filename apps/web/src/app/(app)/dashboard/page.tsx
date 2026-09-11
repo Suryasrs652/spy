@@ -1,12 +1,9 @@
 import Link from "next/link";
 import { serverApiGet } from "@/lib/serverApi";
-import type { EntitlementStatus, Project } from "@/lib/api";
+import type { Project } from "@/lib/api";
 
 export default async function DashboardPage() {
-  const [entitlement, projects] = await Promise.all([
-    serverApiGet<EntitlementStatus>("entitlements/audit"),
-    serverApiGet<Project[]>("projects"),
-  ]);
+  const projects = await serverApiGet<Project[]>("projects");
 
   const hasProjects = projects && projects.length > 0;
 
@@ -16,46 +13,17 @@ export default async function DashboardPage() {
       <p className="text-muted mt-1">What happened, what&apos;s wrong, and what to do next.</p>
 
       <div className="mt-8 card p-6">
-        {entitlement?.can_run ? (
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-medium">
-                {entitlement.type === "FREE_LIFETIME" ? "Your free audit is ready." : `${entitlement.remaining} credit(s) available.`}
-              </div>
-              <div className="text-sm text-muted mt-1">
-                Run a complete SEO, AEO and GEO audit on any site you own.
-              </div>
-            </div>
-            <Link href={hasProjects ? "/projects" : "/projects/new"} className="btn-primary">
-              Run My Next Audit
-            </Link>
-          </div>
-        ) : entitlement?.reason === "ADMIN_DAILY_LIMIT_REACHED" ? (
+        <div className="flex items-center justify-between">
           <div>
-            <div className="font-medium">Daily free audit limit reached.</div>
+            <div className="font-medium">Run as many audits as you like.</div>
             <div className="text-sm text-muted mt-1">
-              Your admin allowance resets at UTC midnight — no need to buy a credit.
+              A complete SEO, AEO and GEO audit of any site you own — free and unmetered.
             </div>
           </div>
-        ) : (
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="font-medium">
-                {entitlement?.reason === "EMAIL_NOT_VERIFIED"
-                  ? "Verify your email to unlock your free audit."
-                  : "Your free audit has been used."}
-              </div>
-              <div className="text-sm text-muted mt-1">
-                {entitlement?.reason === "EMAIL_NOT_VERIFIED"
-                  ? "Check your inbox for the verification link."
-                  : "Buy a credit to run another audit and measure what improved."}
-              </div>
-            </div>
-            {entitlement?.reason !== "EMAIL_NOT_VERIFIED" && (
-              <Link href="/billing" className="btn-primary">Upgrade to Spy Pro</Link>
-            )}
-          </div>
-        )}
+          <Link href={hasProjects ? "/projects" : "/projects/new"} className="btn-primary">
+            Run an Audit
+          </Link>
+        </div>
       </div>
 
       <h2 className="text-lg font-semibold mt-10 mb-4">Your Projects</h2>

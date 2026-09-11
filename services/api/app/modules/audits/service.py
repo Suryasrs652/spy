@@ -6,13 +6,23 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, ValidationAppError
-from app.modules.audits.models import TERMINAL_STATUSES, Audit, AuditJob, AuditStatus
+from app.modules.audits.models import (
+    CURRENT_SCORE_VERSION,
+    TERMINAL_STATUSES,
+    Audit,
+    AuditJob,
+    AuditStatus,
+)
 from app.modules.auth.models import User
-from app.modules.entitlements.service import create_audit_with_entitlement
 from app.modules.organizations.models import Organization
 from app.modules.projects.service import get_project
 from app.modules.recommendations.models import Recommendation
 from app.modules.seo.models import SEVERITY_ORDER, AuditIssue, Severity
+
+# Self-hosted and free: audits aren't metered, so the only cap left is the
+# crawler's own ceiling on how much work one audit may do. It's still
+# server-side — `requested_max_urls` is a client hint, never authority.
+MAX_URLS = 2000
 
 
 async def start_audit(
@@ -24,13 +34,21 @@ async def start_audit(
     requested_max_urls: int | None,
 ) -> Audit:
     project = await get_project(db, organization_id=organization.id, project_id=project_id)
-    audit = await create_audit_with_entitlement(
-        db,
-        organization=organization,
-        user=user,
-        project=project,
-        requested_max_urls=requested_max_urls,
+
+    audit = Audit(
+        organization_id=organization.id,
+        project_id=project.id,
+        requested_by=user.id,
+        status=AuditStatus.QUEUED.value,
+        max_urls=min(requested_max_urls, MAX_URLS) if requested_max_urls else MAX_URLS,
+        score_version=CURRENT_SCORE_VERSION,
     )
+    db.add(audit)
+    await db.flush()
+
+    db.add(AuditJob(audit_id=audit.id, status=AuditStatus.QUEUED.value))
+    await db.commit()
+    await db.refresh(audit)
     return audit
 
 
@@ -176,7 +194,6 @@ async def compare_audits(
 
 async def cancel_audit(db: AsyncSession, *, organization_id: uuid.UUID, audit_id: uuid.UUID) -> Audit:
     from app.modules.audits.models import FailureCategory, FailureCode
-    from app.modules.entitlements.service import release_entitlement_for_audit
 
     audit = await get_audit(db, organization_id=organization_id, audit_id=audit_id)
     if audit.status in [s.value for s in TERMINAL_STATUSES]:
@@ -187,10 +204,5 @@ async def cancel_audit(db: AsyncSession, *, organization_id: uuid.UUID, audit_id
     audit.failure_code = FailureCode.CANCELLED_BY_USER.value
     audit.failure_message = "Cancelled by user."
 
-    # §4: cancelling before/during crawl must not consume the entitlement.
-    # Committed together with the CANCELLED status above in one transaction
-    # (release_entitlement_for_audit itself does not commit) so the two
-    # never land as visibly-separate states.
-    await release_entitlement_for_audit(db, audit)
     await db.commit()
     return audit

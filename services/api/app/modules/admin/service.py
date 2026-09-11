@@ -1,9 +1,8 @@
-"""§129 — revenue, queue-health, and error dashboards for the admin surface.
+"""§129 — queue-health and error dashboards for the admin surface.
 
 Every number here is a plain aggregation over rows that already exist for
-other reasons (purchases, subscriptions, audit jobs, webhook events) — no
-separate analytics pipeline, matching §3's "real data" principle applied to
-the admin surface itself.
+other reasons (audit jobs, audits) — no separate analytics pipeline,
+matching §3's "real data" principle applied to the admin surface itself.
 """
 from __future__ import annotations
 
@@ -15,15 +14,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.db.base import utcnow
 from app.modules.admin.models import AuditLog
 from app.modules.audits.models import TERMINAL_STATUSES, Audit, AuditJob, AuditStatus
-from app.modules.billing.models import (
-    Plan,
-    Purchase,
-    PurchaseStatus,
-    Subscription,
-    SubscriptionStatus,
-    WebhookEvent,
-    WebhookStatus,
-)
 
 # A running job whose heartbeat is older than this while not in a terminal
 # state almost certainly means the worker that held it died mid-audit —
@@ -32,62 +22,6 @@ from app.modules.billing.models import (
 # during a normal audit (which usually finishes in well under a minute) is
 # a real anomaly, not a slow page.
 STUCK_JOB_HEARTBEAT_THRESHOLD_MINUTES = 10
-
-
-async def get_revenue_summary(db: AsyncSession, *, days: int = 30) -> dict:
-    since = utcnow() - timedelta(days=days)
-
-    total_row = (
-        await db.execute(
-            select(func.coalesce(func.sum(Purchase.amount_minor), 0), func.count())
-            .where(Purchase.status == PurchaseStatus.PAID.value)
-        )
-    ).one()
-    recent_row = (
-        await db.execute(
-            select(func.coalesce(func.sum(Purchase.amount_minor), 0), func.count())
-            .where(Purchase.status == PurchaseStatus.PAID.value, Purchase.paid_at >= since)
-        )
-    ).one()
-
-    by_product = (
-        await db.execute(
-            select(Purchase.product_type, func.sum(Purchase.amount_minor), func.count())
-            .where(Purchase.status == PurchaseStatus.PAID.value)
-            .group_by(Purchase.product_type)
-        )
-    ).all()
-
-    by_day = (
-        await db.execute(
-            select(func.date(Purchase.paid_at), func.sum(Purchase.amount_minor), func.count())
-            .where(Purchase.status == PurchaseStatus.PAID.value, Purchase.paid_at >= since)
-            .group_by(func.date(Purchase.paid_at))
-            .order_by(func.date(Purchase.paid_at))
-        )
-    ).all()
-
-    mrr_row = (
-        await db.execute(
-            select(func.coalesce(func.sum(Plan.price_minor), 0), func.count())
-            .select_from(Subscription)
-            .join(Plan, Plan.id == Subscription.plan_id)
-            .where(Subscription.status == SubscriptionStatus.ACTIVE.value, Plan.billing_interval == "MONTHLY")
-        )
-    ).one()
-
-    return {
-        "total_revenue_minor": int(total_row[0]), "total_paid_purchases": int(total_row[1]),
-        "revenue_last_n_days_minor": int(recent_row[0]), "paid_purchases_last_n_days": int(recent_row[1]),
-        "days": days,
-        "mrr_minor": int(mrr_row[0]), "active_subscriptions": int(mrr_row[1]),
-        "revenue_by_product_type": [
-            {"product_type": pt, "amount_minor": int(amt), "count": int(cnt)} for pt, amt, cnt in by_product
-        ],
-        "revenue_by_day": [
-            {"date": str(d), "amount_minor": int(amt), "count": int(cnt)} for d, amt, cnt in by_day
-        ],
-    }
 
 
 async def get_queue_health(db: AsyncSession) -> dict:
@@ -163,15 +97,6 @@ async def get_error_summary(db: AsyncSession, *, days: int = 7) -> dict:
         )
     ).all()
 
-    webhook_errors = (
-        await db.execute(
-            select(WebhookEvent.id, WebhookEvent.event_type, WebhookEvent.error, WebhookEvent.received_at)
-            .where(WebhookEvent.status == WebhookStatus.ERROR.value, WebhookEvent.received_at >= since)
-            .order_by(WebhookEvent.received_at.desc())
-            .limit(50)
-        )
-    ).all()
-
     return {
         "days": days,
         "total_terminal_audits": total_terminal,
@@ -179,10 +104,6 @@ async def get_error_summary(db: AsyncSession, *, days: int = 7) -> dict:
         "failure_rate": round(total_failed / total_terminal, 4) if total_terminal else None,
         "failures_by_code": [{"failure_code": c, "count": int(n)} for c, n in by_code],
         "failures_by_category": [{"failure_category": c, "count": int(n)} for c, n in by_category],
-        "recent_webhook_errors": [
-            {"id": str(i), "event_type": t, "error": e, "received_at": r.isoformat()}
-            for i, t, e, r in webhook_errors
-        ],
     }
 
 

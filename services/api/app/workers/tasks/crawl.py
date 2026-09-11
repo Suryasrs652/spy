@@ -25,7 +25,6 @@ from app.modules.audits.models import Audit, AuditJob, AuditStatus, FailureCateg
 from app.modules.auth.models import User
 from app.modules.backlinks.service import get_backlink_summary, record_discovered_backlinks
 from app.modules.crawler.engine import CrawlFailure, crawl_site
-from app.modules.entitlements.service import consume_entitlement_for_audit, release_entitlement_for_audit
 from app.modules.notifications.service import notify_audit_completed, notify_audit_failed
 from app.modules.projects.models import Project
 from app.modules.recommendations.engine import build_recommendations
@@ -180,10 +179,6 @@ async def _run_audit_async(audit_id: str) -> None:
             audit.status = AuditStatus.COMPLETED.value
             job.status = AuditStatus.COMPLETED.value
             job.heartbeat_at = utcnow()
-            # Committed together with the entitlement consumption below in
-            # one transaction — see consume_entitlement_for_audit's
-            # docstring for why splitting this into two commits is unsafe.
-            await consume_entitlement_for_audit(db, audit)
             await db.commit()
             logger.info("audit_completed", audit_id=audit_id, spy_score=audit.spy_score)
 
@@ -213,12 +208,6 @@ async def _fail_audit(db, audit: Audit, job: AuditJob, *, category: str, code: s
     job.error_detail = message
     job.completed_at = utcnow()
 
-    # §4/§30/§119: a qualifying failure releases the reserved entitlement so
-    # the user is not charged their free audit (or a paid credit) for a
-    # crawl that never produced a usable result. Committed in the same
-    # transaction as the FAILED status above — see
-    # release_entitlement_for_audit's docstring for why that matters.
-    await release_entitlement_for_audit(db, audit)
     await db.commit()
     logger.warning("audit_failed", audit_id=str(audit.id), category=category, code=code)
 

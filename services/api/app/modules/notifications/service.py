@@ -22,8 +22,6 @@ from app.modules.notifications.models import Notification, NotificationType
 _EMAIL_SUBJECTS = {
     NotificationType.AUDIT_COMPLETED: "Your Spy audit is ready",
     NotificationType.AUDIT_FAILED: "Your Spy audit couldn't complete",
-    NotificationType.PURCHASE_SUCCEEDED: "Your Spy purchase was successful",
-    NotificationType.PURCHASE_FAILED: "Your Spy purchase failed",
 }
 
 
@@ -72,35 +70,9 @@ async def notify_audit_failed(db: AsyncSession, *, audit, requester_email: str) 
         user_id=audit.requested_by, organization_id=audit.organization_id,
         type=NotificationType.AUDIT_FAILED,
         title="Your audit couldn't complete",
-        body=f"Your Spy audit failed: {reason} Your credit has been returned — you can try again.",
+        body=f"Your Spy audit failed: {reason} You can run it again whenever you like.",
         link_path=f"/audits/{audit.id}",
         email_to=requester_email,
-    )
-
-
-async def notify_purchase_succeeded(db: AsyncSession, *, purchase, owner_user_id: uuid.UUID, owner_email: str) -> None:
-    amount = purchase.amount_minor / 100
-    await create_notification(
-        db,
-        user_id=owner_user_id, organization_id=purchase.organization_id,
-        type=NotificationType.PURCHASE_SUCCEEDED,
-        title="Purchase successful",
-        body=f"Your payment of {purchase.currency} {amount:.2f} was successful and your credit is ready to use.",
-        link_path="/billing",
-        email_to=owner_email,
-    )
-
-
-async def notify_purchase_failed(db: AsyncSession, *, purchase, owner_user_id: uuid.UUID, owner_email: str) -> None:
-    amount = purchase.amount_minor / 100
-    await create_notification(
-        db,
-        user_id=owner_user_id, organization_id=purchase.organization_id,
-        type=NotificationType.PURCHASE_FAILED,
-        title="Purchase failed",
-        body=f"Your payment of {purchase.currency} {amount:.2f} did not go through. No credit was granted.",
-        link_path="/billing",
-        email_to=owner_email,
     )
 
 

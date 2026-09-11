@@ -11,17 +11,6 @@ interface Overview {
   audit_completion_rate: number | null;
 }
 
-interface Revenue {
-  total_revenue_minor: number;
-  total_paid_purchases: number;
-  revenue_last_n_days_minor: number;
-  paid_purchases_last_n_days: number;
-  days: number;
-  mrr_minor: number;
-  active_subscriptions: number;
-  revenue_by_product_type: { product_type: string; amount_minor: number; count: number }[];
-}
-
 interface QueueHealth {
   jobs_by_status: Record<string, number>;
   oldest_queued_job_age_seconds: number | null;
@@ -34,54 +23,46 @@ interface ErrorSummary {
   total_failed_audits: number;
   failure_rate: number | null;
   failures_by_code: { failure_code: string; count: number }[];
-  recent_webhook_errors: { id: string; event_type: string; error: string | null; received_at: string }[];
-}
-
-function rupees(minor: number): string {
-  return `₹${(minor / 100).toLocaleString("en-IN")}`;
 }
 
 export default function AdminPage() {
   const [overview, setOverview] = useState<Overview | null>(null);
-  const [revenue, setRevenue] = useState<Revenue | null>(null);
   const [queue, setQueue] = useState<QueueHealth | null>(null);
   const [errors, setErrors] = useState<ErrorSummary | null>(null);
-  const [forbidden, setForbidden] = useState(false);
+  const [failed, setFailed] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([
       apiGet<Overview>("admin/overview"),
-      apiGet<Revenue>("admin/revenue"),
       apiGet<QueueHealth>("admin/queue"),
       apiGet<ErrorSummary>("admin/errors"),
     ])
-      .then(([o, r, q, e]) => {
+      .then(([o, q, e]) => {
         setOverview(o);
-        setRevenue(r);
         setQueue(q);
         setErrors(e);
       })
       .catch((err) => {
-        if (err instanceof ApiError && err.status === 403) setForbidden(true);
+        setFailed(err instanceof ApiError ? err.message : "Couldn't load the admin dashboards.");
       });
   }, []);
 
-  if (forbidden) {
+  if (failed) {
     return (
       <div className="p-8">
-        <h1 className="text-2xl font-semibold text-red-400">Admin access required</h1>
-        <p className="text-muted mt-2">Your account doesn&apos;t have platform-admin access.</p>
+        <h1 className="text-2xl font-semibold text-red-400">Admin</h1>
+        <p className="text-muted mt-2">{failed}</p>
       </div>
     );
   }
 
-  if (!overview || !revenue || !queue || !errors) return <div className="p-8 text-muted">Loading…</div>;
+  if (!overview || !queue || !errors) return <div className="p-8 text-muted">Loading…</div>;
 
   return (
     <div className="p-8 max-w-6xl space-y-10">
       <div>
         <h1 className="text-2xl font-semibold">Admin</h1>
-        <p className="text-muted text-sm mt-1">Platform-wide overview — visible only to super admins.</p>
+        <p className="text-muted text-sm mt-1">Instance-wide health for this self-hosted deployment.</p>
       </div>
 
       <section>
@@ -104,41 +85,6 @@ export default function AdminPage() {
             <div className="text-xs text-muted uppercase tracking-wide mt-1">Completion Rate</div>
           </div>
         </div>
-      </section>
-
-      <section>
-        <h2 className="text-lg font-semibold mb-4">Revenue</h2>
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
-          <div className="card p-5">
-            <div className="text-2xl font-bold">{rupees(revenue.total_revenue_minor)}</div>
-            <div className="text-xs text-muted uppercase tracking-wide mt-1">Total Revenue</div>
-          </div>
-          <div className="card p-5">
-            <div className="text-2xl font-bold">{rupees(revenue.revenue_last_n_days_minor)}</div>
-            <div className="text-xs text-muted uppercase tracking-wide mt-1">Last {revenue.days} Days</div>
-          </div>
-          <div className="card p-5">
-            <div className="text-2xl font-bold">{rupees(revenue.mrr_minor)}</div>
-            <div className="text-xs text-muted uppercase tracking-wide mt-1">MRR</div>
-          </div>
-          <div className="card p-5">
-            <div className="text-2xl font-bold">{revenue.active_subscriptions}</div>
-            <div className="text-xs text-muted uppercase tracking-wide mt-1">Active Subscriptions</div>
-          </div>
-        </div>
-        {revenue.revenue_by_product_type.length > 0 && (
-          <div className="card p-4">
-            <div className="text-xs text-muted uppercase tracking-wide mb-2">By Product</div>
-            <div className="space-y-1">
-              {revenue.revenue_by_product_type.map((row) => (
-                <div key={row.product_type} className="flex justify-between text-sm">
-                  <span>{row.product_type}</span>
-                  <span className="text-muted">{rupees(row.amount_minor)} ({row.count})</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
       </section>
 
       <section>
@@ -170,7 +116,7 @@ export default function AdminPage() {
 
       <section>
         <h2 className="text-lg font-semibold mb-4">Errors (last {errors.days} days)</h2>
-        <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4">
+        <div className="grid grid-cols-2 gap-4 mb-4">
           <div className="card p-5">
             <div className="text-2xl font-bold">{errors.total_failed_audits}</div>
             <div className="text-xs text-muted uppercase tracking-wide mt-1">Failed Audits</div>
@@ -180,10 +126,6 @@ export default function AdminPage() {
               {errors.failure_rate !== null ? `${(errors.failure_rate * 100).toFixed(1)}%` : "N/A"}
             </div>
             <div className="text-xs text-muted uppercase tracking-wide mt-1">Failure Rate</div>
-          </div>
-          <div className="card p-5">
-            <div className="text-2xl font-bold">{errors.recent_webhook_errors.length}</div>
-            <div className="text-xs text-muted uppercase tracking-wide mt-1">Webhook Errors</div>
           </div>
         </div>
         {errors.failures_by_code.length > 0 && (

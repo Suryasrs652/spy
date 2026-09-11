@@ -69,6 +69,28 @@ async def _reset_between_tests() -> AsyncGenerator[None, None]:
     get_redis.cache_clear()
 
     await get_redis().flushdb()
+
+    # Every test now shares the one local workspace instead of getting a
+    # freshly-signed-up org, so project uniqueness — (organization_id,
+    # canonical_origin), §63 — would collide across tests that audit the
+    # same real domain. Clearing projects between tests restores the
+    # isolation the per-test org used to provide; audits, crawl pages,
+    # issues and reports all cascade from the project row.
+    # Notifications are user-scoped rather than project-scoped, so they
+    # don't cascade with the projects below — and with one shared user,
+    # a previous test's rows would otherwise show up in the next test's
+    # unread counts.
+    from sqlalchemy import delete
+
+    from app.db.session import AsyncSessionLocal
+    from app.modules.notifications.models import Notification
+    from app.modules.projects.models import Project
+
+    async with AsyncSessionLocal() as session:
+        await session.execute(delete(Notification))
+        await session.execute(delete(Project))
+        await session.commit()
+
     yield
 
 
@@ -106,29 +128,27 @@ async def client() -> AsyncGenerator[AsyncClient, None]:
 
 @pytest_asyncio.fixture
 async def verified_user(db: AsyncSession):
-    """Creates a fresh, already-email-verified user + workspace, and
-    returns (user, organization_id, access_token) — bypassing the
-    email-verification-link round trip since these tests aren't about the
-    email flow itself.
+    """Returns (user, organization_id, token) for the single local
+    workspace.
+
+    Spy is self-hosted and single-user now (app.core.local_workspace), so
+    there is no signup and no token — but the tuple shape and the
+    `auth_headers` fixture below are kept exactly as they were so every
+    existing test's call sites stay unchanged.
     """
-    from app.core.security import issue_access_token
-    from app.modules.auth import service as auth_service
-    from datetime import datetime, timezone
+    from app.core.local_workspace import LOCAL_ORG_ID, get_local_user
 
-    email = unique_email()
-    user, org_id = await auth_service.signup(db, email=email, password="correct horse battery staple", name=None)
-    user.email_verified_at = datetime.now(timezone.utc)
-    await db.commit()
-    await db.refresh(user)
-
-    token = issue_access_token(str(user.id), str(org_id))
-    return user, org_id, token
+    user = await get_local_user(db)
+    return user, LOCAL_ORG_ID, ""
 
 
 @pytest.fixture
 def auth_headers():
-    def _make(token: str, org_id) -> dict:
-        return {"Authorization": f"Bearer {token}", "X-Organization-Id": str(org_id)}
+    """No-op: requests carry no credentials now. Kept so tests can go on
+    calling `auth_headers(token, org_id)` unchanged."""
+
+    def _make(token: str = "", org_id=None) -> dict:
+        return {}
 
     return _make
 

@@ -7,10 +7,8 @@ from app.modules.admin import models as admin_models  # noqa: F401
 from app.modules.audits import models as audits_models  # noqa: F401
 from app.modules.auth import models as auth_models  # noqa: F401
 from app.modules.backlinks import models as backlinks_models  # noqa: F401
-from app.modules.billing import models as billing_models  # noqa: F401
 from app.modules.competitors import models as competitors_models  # noqa: F401
 from app.modules.crawler import models as crawler_models  # noqa: F401
-from app.modules.entitlements import models as entitlements_models  # noqa: F401
 from app.modules.gsc import models as gsc_models  # noqa: F401
 from app.modules.keywords import models as keywords_models  # noqa: F401
 from app.modules.notifications import models as notifications_models  # noqa: F401

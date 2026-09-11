@@ -1,7 +1,7 @@
 /**
- * Client-side fetch helpers. Authenticated calls go through `/api/proxy/*`
- * (same-origin, session-gated — see route.ts there); the handful of
- * pre-session auth actions go through `/api/public-auth/*`.
+ * Client-side fetch helpers. Everything goes through `/api/proxy/*`
+ * (same-origin — see route.ts there), which forwards to FastAPI. Spy is
+ * self-hosted and single-user, so there is no session or token involved.
  */
 
 export class ApiError extends Error {
@@ -70,25 +70,7 @@ export async function apiDelete(path: string): Promise<void> {
   if (!res.ok) await parseErrorOrThrow(res);
 }
 
-export async function publicAuthPost<T>(action: string, body: unknown): Promise<T> {
-  const res = await fetch(`/api/public-auth/${action}`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-    cache: "no-store",
-  });
-  if (!res.ok) return parseErrorOrThrow(res);
-  return (await res.json()) as T;
-}
-
 // ── Domain types (mirrors services/api/app/modules/*/schemas.py) ────────
-export interface EntitlementStatus {
-  can_run: boolean;
-  type: string | null;
-  remaining: number | null;
-  reason: string | null;
-}
-
 export interface Project {
   id: string;
   name: string;
@@ -242,18 +224,6 @@ export interface AuditComparison {
   persisting_issues: IssueSummary[];
   page_count_baseline: number;
   page_count_current: number;
-}
-
-export interface Plan {
-  code: string;
-  name: string;
-  price_minor: number;
-  currency: string;
-  billing_interval: string;
-  audit_limit: number | null;
-  crawl_url_limit: number;
-  project_limit: number | null;
-  member_limit: number | null;
 }
 
 export interface BacklinkSummary {

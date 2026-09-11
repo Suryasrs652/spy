@@ -1,8 +1,10 @@
-"""§104 security hardening pass — each test targets one concrete gap found
-during the audit: an unrated login endpoint (online brute force), a
-naive `!=` secret comparison (timing side-channel), an unconditionally
-trusted X-Forwarded-For (rate-limit bypass), and unchecked default secrets
-reaching a production boot.
+"""§104 security hardening pass.
+
+The login brute-force and internal-token tests went away with sign-in
+itself (Spy is self-hosted and single-user now). What's left still
+applies to any deployment: an unconditionally trusted X-Forwarded-For
+(rate-limit bypass) and unchecked default secrets reaching a production
+boot.
 """
 from __future__ import annotations
 
@@ -12,7 +14,6 @@ import pytest
 
 from app.core.config import Settings, get_settings
 from app.core.ratelimit import client_ip
-from tests.conftest import unique_email
 
 
 def _make_request(*, client_host: str, xff: str | None):
@@ -67,62 +68,3 @@ def test_development_settings_allow_placeholder_defaults() -> None:
     # The whole point of the check is that it only bites in production —
     # local dev must keep working with the documented placeholder values.
     Settings(environment="development")
-
-
-@pytest.mark.asyncio
-async def test_login_attempts_are_rate_limited_per_email(client) -> None:
-    from app.core.config import get_settings as _get_settings
-    from app.modules.auth import service as auth_service
-
-    settings = _get_settings()
-    email = unique_email()
-
-    from app.db.session import AsyncSessionLocal
-
-    async with AsyncSessionLocal() as db:
-        await auth_service.signup(db, email=email, password="correct horse battery staple", name=None)
-
-    headers = {"X-Internal-Token": settings.internal_service_token}
-    responses = []
-    for _ in range(12):
-        resp = await client.post(
-            "/internal/auth/verify-credentials",
-            json={"email": email, "password": "definitely-the-wrong-password"},
-            headers=headers,
-        )
-        responses.append(resp.status_code)
-
-    assert all(s == 401 for s in responses[:10]), "wrong-password attempts within budget should read as 401"
-    assert 429 in responses[10:], "attempts past the per-email budget must be rate-limited, not silently allowed"
-
-
-@pytest.mark.asyncio
-async def test_internal_token_endpoint_rejects_wrong_token(client) -> None:
-    resp = await client.post(
-        "/internal/auth/verify-credentials",
-        json={"email": unique_email(), "password": "whatever"},
-        headers={"X-Internal-Token": "not-the-real-token"},
-    )
-    assert resp.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_internal_token_endpoint_rejects_missing_token(client) -> None:
-    resp = await client.post(
-        "/internal/auth/verify-credentials",
-        json={"email": unique_email(), "password": "whatever"},
-    )
-    assert resp.status_code == 401
-
-
-@pytest.mark.asyncio
-async def test_password_hash_and_verify_roundtrip() -> None:
-    """§104 load-test finding: hash_password/verify_password moved onto
-    asyncio.to_thread so Argon2id's CPU-bound work stops blocking the
-    event loop — this locks in that the roundtrip is still correct.
-    """
-    from app.core.security import hash_password, verify_password
-
-    hashed = await hash_password("correct horse battery staple")
-    assert await verify_password("correct horse battery staple", hashed) is True
-    assert await verify_password("wrong password", hashed) is False

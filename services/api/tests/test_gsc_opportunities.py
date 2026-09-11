@@ -10,14 +10,13 @@ import pytest
 
 from app.modules.gsc.models import GscConnection, GscConnectionStatus, GscProperty
 from app.modules.gsc.opportunities import get_search_opportunities
-from tests.conftest import unique_email
 
 
 async def _make_property(db) -> GscProperty:
-    from app.modules.auth import service as auth_service
+    from app.core.local_workspace import LOCAL_ORG_ID, get_local_user
 
-    email = unique_email()
-    user, org_id = await auth_service.signup(db, email=email, password="correct horse battery staple", name=None)
+    user = await get_local_user(db)
+    org_id = LOCAL_ORG_ID
 
     connection = GscConnection(
         organization_id=org_id, user_id=user.id, google_account_id="test-account",

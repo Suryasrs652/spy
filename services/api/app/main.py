@@ -70,12 +70,8 @@ API_PREFIX = "/api/v1"
 
 from app.modules.admin.router import router as admin_router  # noqa: E402
 from app.modules.audits.router import router as audits_router  # noqa: E402
-from app.modules.auth.internal_router import router as auth_internal_router  # noqa: E402
-from app.modules.auth.router import router as auth_router  # noqa: E402
 from app.modules.backlinks.router import router as backlinks_router  # noqa: E402
-from app.modules.billing.router import router as billing_router  # noqa: E402
 from app.modules.competitors.router import router as competitors_router  # noqa: E402
-from app.modules.entitlements.router import router as entitlements_router  # noqa: E402
 from app.modules.gsc.router import router as gsc_router  # noqa: E402
 from app.modules.keywords.router import router as keywords_router  # noqa: E402
 from app.modules.notifications.router import router as notifications_router  # noqa: E402
@@ -83,14 +79,10 @@ from app.modules.organizations.router import router as organizations_router  # n
 from app.modules.projects.router import router as projects_router  # noqa: E402
 from app.modules.reports.router import router as reports_router  # noqa: E402
 
-app.include_router(auth_router, prefix=API_PREFIX)
-app.include_router(auth_internal_router)  # already carries its own /internal/auth prefix, unversioned on purpose
 app.include_router(organizations_router, prefix=API_PREFIX)
 app.include_router(projects_router, prefix=API_PREFIX)
-app.include_router(entitlements_router, prefix=API_PREFIX)
 app.include_router(audits_router, prefix=API_PREFIX)
 app.include_router(reports_router, prefix=API_PREFIX)
-app.include_router(billing_router, prefix=API_PREFIX)
 app.include_router(gsc_router, prefix=API_PREFIX)
 app.include_router(admin_router, prefix=API_PREFIX)
 app.include_router(notifications_router, prefix=API_PREFIX)

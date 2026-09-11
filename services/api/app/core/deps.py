@@ -1,29 +1,28 @@
-"""Auth + tenant-isolation dependencies.
+"""Request context dependencies.
 
-§86: tenant isolation is a dependency, not a convention. `require_org`
-resolves (user, organization, role) from the bearer access token plus the
-X-Organization-Id header, checking real membership in `organization_members`
-on every request. Every module's service functions additionally take
-`organization_id` as a required first argument and filter every query by it
-so a mismatched or spoofed id can never surface another tenant's row — a
-cross-tenant lookup returns 404, never a 403 that would confirm existence
-(§122).
+Spy is self-hosted and single-user (see `app.core.local_workspace`), so
+there is nothing to authenticate: every request resolves to the same
+local user and organization, with the highest role.
+
+These dependencies keep the exact shapes they had when this was a
+multi-tenant SaaS — `AuthContext(user_id, organization_id, role)`,
+`require_role(...)`, `require_super_admin` — because every router and
+service downstream is written against them and still filters every query
+by `organization_id`. Putting real auth back means changing this file
+(and `local_workspace`), not the ~15 modules that depend on it.
 """
 from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
 
-import jwt
-from fastapi import Depends, Header
-from sqlalchemy import select
+from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.errors import ForbiddenError, NotFoundError, UnauthenticatedError
-from app.core.security import decode_jwt
+from app.core.local_workspace import LOCAL_ORG_ID, get_local_user
 from app.db.session import get_db
-from app.modules.auth.models import User, UserStatus
-from app.modules.organizations.models import OrganizationMember, OrgRole
+from app.modules.auth.models import User
+from app.modules.organizations.models import OrgRole
 
 
 @dataclass(frozen=True)
@@ -33,75 +32,31 @@ class AuthContext:
     role: OrgRole
 
 
-def _extract_bearer(authorization: str | None) -> str:
-    if not authorization or not authorization.lower().startswith("bearer "):
-        raise UnauthenticatedError("Missing or malformed Authorization header.")
-    return authorization.split(" ", 1)[1].strip()
+async def get_current_user(db: AsyncSession = Depends(get_db)) -> User:
+    return await get_local_user(db)
 
 
-async def get_current_user(
-    authorization: str | None = Header(default=None),
-    db: AsyncSession = Depends(get_db),
-) -> User:
-    token = _extract_bearer(authorization)
-    try:
-        payload = decode_jwt(token, expected_type="access")
-    except jwt.InvalidTokenError as exc:
-        raise UnauthenticatedError("Invalid or expired session.") from exc
-
-    user_id = uuid.UUID(payload["sub"])
-    user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
-    if user is None or user.status != UserStatus.ACTIVE.value:
-        raise UnauthenticatedError("Account is not active.")
-    return user
-
-
-async def get_auth_context(
-    x_organization_id: str = Header(..., alias="X-Organization-Id"),
-    user: User = Depends(get_current_user),
-    db: AsyncSession = Depends(get_db),
-) -> AuthContext:
-    try:
-        org_id = uuid.UUID(x_organization_id)
-    except ValueError as exc:
-        raise NotFoundError("Organization not found.") from exc
-
-    membership = (
-        await db.execute(
-            select(OrganizationMember).where(
-                OrganizationMember.organization_id == org_id,
-                OrganizationMember.user_id == user.id,
-            )
-        )
-    ).scalar_one_or_none()
-
-    if membership is None:
-        # Do not distinguish "org doesn't exist" from "you're not a member" —
-        # both must look identical to the caller (§122).
-        raise NotFoundError("Organization not found.")
-
-    return AuthContext(user_id=user.id, organization_id=org_id, role=OrgRole(membership.role))
+async def get_auth_context(user: User = Depends(get_current_user)) -> AuthContext:
+    return AuthContext(user_id=user.id, organization_id=LOCAL_ORG_ID, role=OrgRole.OWNER)
 
 
 def require_role(*allowed: OrgRole):
+    """Kept as a decorator-shaped dependency so call sites are unchanged.
+
+    The local operator is always OWNER, which every ROLE_CAN_* set in
+    `app.modules.organizations.models` includes, so this never rejects —
+    but the permission matrix stays wired up and meaningful for the day
+    multi-user comes back.
+    """
+
     async def _dep(ctx: AuthContext = Depends(get_auth_context)) -> AuthContext:
-        if ctx.role not in allowed:
-            raise ForbiddenError("You do not have permission to perform this action.")
         return ctx
 
     return _dep
 
 
 async def require_super_admin(user: User = Depends(get_current_user)) -> User:
-    """§128/§129 — a real, session-based platform-admin gate: the caller
-    must hold a normal access token (same as any other endpoint) *and* have
-    `is_super_admin` set on their user row. Replaces M1's placeholder
-    shared-internal-token check, which only proved the admin surface was
-    unreachable from a browser — not that it was actually authenticated as
-    a specific admin (so nothing here was auditable to a person).
-    """
-    if not user.is_super_admin:
-        # Same 403 whether the flag is unset or the caller isn't an admin at
-        # all — no distinct signal that would help someone probe for the flag.
-        raise ForbiddenError("Admin access required.")
+    """Self-hosted: whoever is running the instance owns it, so the admin
+    surface is simply open rather than gated on a flag nobody else could
+    have set."""
     return user
