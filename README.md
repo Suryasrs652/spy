@@ -116,38 +116,75 @@ auth, **don't expose this to the internet as-is.**
 The repo ships agents and skills in `.claude/`, so an audit can be run and
 interpreted conversationally rather than by hand.
 
-Analysis runs as a pipeline: five specialists look at one dimension each, a
-validator checks their findings against the live site, and a report agent turns
-what survives into the deliverable.
+Analysis runs as a pipeline. Eleven specialists each look at one dimension,
+a validator checks every finding against the live site, a resolver settles
+disagreements between them, and only then is anything scored, sequenced and
+written up.
 
 ```
-                 ┌── seo-analyst ──────┐
-                 ├── aeo-analyst ──────┤
-  crawl ────────►├── geo-analyst ──────┤──► findings-validator ──► report-writer
-                 ├── crawl-analyst ────┤
-                 └── gsc-analyst ──────┘
+                        ┌── technical-seo-analyst ──┐
+                        ├── onpage-analyst ─────────┤
+                        ├── content-analyst ────────┤
+                        ├── schema-analyst ─────────┤
+                        ├── entity-analyst ─────────┤
+  URL ──► Crawl Engine ─┼── aeo-analyst ────────────┤
+                        ├── geo-analyst ────────────┤
+                        ├── internal-link-analyst ──┤
+                        ├── performance-analyst ────┤
+                        ├── competitor-analyst ─────┤
+                        └── gsc-analyst ────────────┘
+                                      │
+                                      ▼
+                            evidence-validator
+                                      │
+                                      ▼
+                           contradiction-resolver
+                                      │
+                                      ▼
+                      Scoring Engine  (deterministic, in-repo)
+                                      │
+                                      ▼
+                              strategy-agent
+                                      │
+                                      ▼
+                               report-agent
 ```
 
-The five analysts are independent and should be run in parallel. Nothing
-reaches the report without passing the validator — this scanner has produced
-false positives about real sites, and the validator exists specifically to
-catch them before a human acts on one.
+The eleven analysts are independent and should be run in parallel. Everything
+after them is strictly sequential, and the order is the point: nothing reaches
+a human that hasn't been verified against the live site, and nothing is
+sequenced before the analysts' disagreements are settled.
+
+**The Scoring Engine is deliberately not an agent.** Scores come from
+`services/api/app/modules/scoring/spy_score.py` — versioned, deterministic,
+derived from stored crawl evidence. The same crawl always produces the same
+score, which is what makes two audits of a site comparable and lets any number
+be traced back to the evidence behind it. An agent scoring by judgement would
+give a different answer each run and quietly break re-auditing.
 
 | Agent | Does |
 | --- | --- |
-| `seo-analyst` | Metadata, indexability, headings, content, images, links, security headers |
-| `aeo-analyst` | Schema coverage, heading hygiene, question coverage, authorship |
-| `geo-analyst` | Organization entity markup, field completeness, name consistency |
-| `crawl-analyst` | Page inventory, click depth, PageRank support, sitemap coverage |
+| `technical-seo-analyst` | Indexability, canonicals, robots, security headers, redirects, hreflang; also diagnoses failed crawls |
+| `onpage-analyst` | Titles, descriptions, H1s, Open Graph, duplication |
+| `content-analyst` | Thin and duplicate content, heading outline, depth, stuffing |
+| `schema-analyst` | Which JSON-LD types are deployed, where, and what's missing |
+| `entity-analyst` | Who the site says it is — identity, consistency, `sameAs`, authorship |
+| `aeo-analyst` | Extractability for answer engines: questions, structure, bylines |
+| `geo-analyst` | Entity definition for generative engines |
+| `internal-link-analyst` | PageRank distribution, unlinked pages, dead ends |
+| `performance-analyst` | Server response, weight, layout-shift risk — and what isn't measured |
+| `competitor-analyst` | Score comparison and content gap against named rivals |
 | `gsc-analyst` | Real Search Console performance and the opportunity engine |
-| `findings-validator` | Verifies every finding against the live site; sorts them confirmed / refuted / unverified |
-| `report-writer` | Writes the final report, ranked by leverage, and publishes it |
+| `evidence-validator` | Verifies every finding against the live site; sorts confirmed / refuted / unverified |
+| `contradiction-resolver` | Settles disagreements between analysts; flags metrics that contradict their own data |
+| `strategy-agent` | Names the binding constraint and sequences the work by leverage |
+| `report-agent` | Writes the final report and publishes it |
 | `rule-author` | Adds or fixes checks in the rule engine (development, not analysis) |
 
 Skills carry the domain knowledge each agent loads — `spy-audit` for operating
-the tool, one `*-signals` skill per dimension, plus `finding-validation` and
-`audit-reporting`. They are usable directly too: ask about `aeo-signals` without
-spawning an agent.
+the tool, one reference per dimension, plus `finding-validation`,
+`contradiction-resolution` and `audit-reporting`. They are usable directly too:
+ask about `schema-signals` without spawning an agent.
 
 Two rules run through all of them: **verify before claiming**, and **"not
 measured" is never "zero"**.
