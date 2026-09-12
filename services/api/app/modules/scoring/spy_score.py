@@ -1,74 +1,182 @@
-"""§21/§22 Spy Score, plus the §48/§49 AEO/GEO reduced deterministic subset.
+"""The three scores Spy reports, and the one number that combines them.
 
-Pure function of stored crawl evidence + rule findings — no re-fetching, no
-LLM guessing (§3). Every audit stores the `score_version` it was computed
-under (`CURRENT_SCORE_VERSION`); a later change to weights or formulas ships
-under a new version string and never mutates a completed audit's score
-(§22, §132).
+    OVERALL DIGITAL SEARCH SCORE
+      SEO   — can a search engine crawl, index and rank this?
+      AEO   — can an answer engine lift an answer out of it?
+      GEO   — can a generative system tell who wrote it and reuse it?
 
-Authority (§144/M5) is built from internal PageRank plus Spy's own
-crawl-derived backlink index (app/modules/backlinks) — real evidence, but
-still reported as unavailable (weight redistributed to the components that
-do have data, per §3's "never manufacture certainty" principle) whenever
-that index has zero referring domains for this site, since that could mean
-either "genuinely no backlinks" or just "nobody Spy has crawled yet happens
-to link here" and the two must never look the same as a confident low
-score. AEO (§48) and GEO (§49) are computed from the full deterministic
-signal set the M2 crawler extracts — question-phrased headings, structured
-content (lists/tables/definitions), author bylines, and full JSON-LD schema
-blocks — rather than M1's reduced subset (schema presence + heading
-hygiene only).
+These answer genuinely different questions, so they are computed separately
+and reported separately. AEO and GEO used to be two 10% slices inside a
+single composite, which meant a site could be excellent at both and see the
+number move by almost nothing — and a reader had no way to tell a ranking
+problem from a citability problem.
+
+SEO is itself seven components out of 100 (see SEO_COMPONENT_WEIGHTS), AEO is
+seven sub-scores and GEO is ten. Every one of them is a pure function of
+stored crawl evidence and rule findings — no re-fetching, no LLM guessing
+(§3). Every audit stores the `score_version` it was computed under; changing
+a weight or a formula ships a new version string and never mutates a
+completed audit's score (§22, §132).
+
+Three things here are deliberately *not* scored, because the evidence to
+score them does not exist in a crawl:
+
+  - **Authority** is reported as unmeasured, not zero, whenever Spy's own
+    crawl-derived backlink index has no referring domains for the site. That
+    could mean "no backlinks" or "nobody Spy has crawled happens to link
+    here", and a confident low score must never stand in for either.
+  - **Original information gain** (GEO) needs a corpus to compare against.
+  - **Off-site topical authority** needs the same. The on-site half — does
+    this site actually cover its subject in depth — is measurable, and that
+    is the only half `topical_authority` claims to measure.
+
+Where a component has no evidence, its weight is redistributed across the
+components that do, rather than being scored as a failure.
 """
 from __future__ import annotations
 
 import math
+from collections import Counter
 from dataclasses import dataclass, field
 
 from app.core.schema_org import ORGANIZATION_TYPES
 from app.modules.crawler.models import CrawlPage, PageLink
-from app.modules.scoring.acrs import compute_acrs
+from app.modules.scoring.acrs import (
+    evidence_from_components,
+    measure_citation_signals,
+    score_from_components,
+)
 from app.modules.seo.rules import RuleFinding
 
-CURRENT_SCORE_VERSION = "spy-score-v1.0"
+CURRENT_SCORE_VERSION = "spy-score-v2.0"
 
-# §21 composition. "authority" is included for documentation even though
-# M1 has no data source for it; see _redistribute_weights.
-COMPONENT_WEIGHTS = {
-    "technical": 0.20,
-    "onpage": 0.15,
-    "content": 0.15,
+# The headline number. SEO carries the most weight because it still decides
+# whether anyone arrives at all; AEO and GEO decide what happens to the
+# content once a machine has it, and are weighted equally to each other
+# because neither is subordinate to the other.
+SEARCH_SCORE_WEIGHTS = {"seo": 0.60, "aeo": 0.20, "geo": 0.20}
+
+# SEO out of 100, as seven components.
+SEO_COMPONENT_WEIGHTS = {
+    "technical": 0.25,
+    "onpage": 0.20,
+    "content": 0.20,
+    "internal_links": 0.10,
+    "structured_data": 0.10,
     "performance": 0.10,
-    "architecture": 0.10,
-    "authority": 0.10,
-    "aeo": 0.10,
-    "geo": 0.10,
+    "authority": 0.05,
+}
+
+AEO_COMPONENT_WEIGHTS = {
+    "answerability": 0.20,
+    "question_coverage": 0.15,
+    "passage_extraction": 0.15,
+    "structured_answers": 0.15,
+    "schema_support": 0.15,
+    "faq_implementation": 0.10,
+    "entity_clarity": 0.10,
+}
+
+GEO_COMPONENT_WEIGHTS = {
+    "entity_recognition": 0.15,
+    "citation_readiness": 0.12,
+    "fact_density": 0.12,
+    "brand_consistency": 0.10,
+    "source_attribution": 0.10,
+    "knowledge_graph_signals": 0.10,
+    "topical_authority": 0.10,
+    "author_transparency": 0.08,
+    "ai_readable_structure": 0.08,
+    # Listed with a weight so it is on the record as a dimension that
+    # belongs here, and always dropped, because establishing that
+    # information appears nowhere else requires a corpus to compare
+    # against. Its weight is redistributed across the nine that are real.
+    "original_information_gain": 0.05,
 }
 
 _SEVERITY_DEDUCTION = {"CRITICAL": 25, "HIGH": 15, "MEDIUM": 8, "LOW": 3, "INFO": 0}
 
 _TECHNICAL_CATEGORIES = {"Crawlability", "Indexability", "Security", "International"}
-_ONPAGE_CATEGORIES = {"Metadata", "Images", "Structured Data"}
+_ONPAGE_CATEGORIES = {"Metadata", "Images"}
 _CONTENT_CATEGORIES = {"Content"}
-_ARCHITECTURE_CATEGORIES = {"Links"}
+_INTERNAL_LINK_CATEGORIES = {"Links"}
+_STRUCTURED_DATA_CATEGORIES = {"Structured Data"}
+
+# Schema types that mark a page up as an explicit question-and-answer unit.
+_FAQ_SCHEMA_TYPES = frozenset({"FAQPage", "QAPage", "HowTo"})
+
+# Entity types that make the subject of a page unambiguous to a machine.
+_ENTITY_SCHEMA_TYPES = frozenset({"Person", "Product", "Service"})
+
+# The fields that make an entity resolvable in a knowledge graph rather than
+# merely declared: who it is, where it lives, and what corroborates it.
+_KNOWLEDGE_GRAPH_FIELDS = ("@id", "sameAs", "url", "logo")
+_ORG_RICH_FIELDS = ("name", "url", "logo", "sameAs")
+
+# A page has to say something substantial before it counts toward covering a
+# subject in depth. Matches LONG_CONTENT_WORD_THRESHOLD in the rule engine.
+SUBSTANTIVE_PAGE_WORDS = 600
+
+# Roughly where on-site topical depth stops being the binding constraint: a
+# site with thirty substantive pages on its subject is no longer thin, and
+# the next thirty say much less than the first thirty did. Log-scaled for
+# that reason, like the referring-domain curve below.
+TOPICAL_BREADTH_TARGET = 30
 
 
 @dataclass
 class ScoreBreakdown:
+    """`spy_score` is the Overall Digital Search Score; `seo_score` is the
+    seven-component SEO score, and the four sub-component fields below it are
+    parts of that, not peers of it.
+    """
+
     spy_score: float
-    technical_score: float
     seo_score: float
+    aeo_score: float | None
+    geo_score: float | None
+    acrs_score: float
+    # SEO sub-components, each out of 100.
+    technical_score: float
+    onpage_score: float
     content_score: float
+    internal_links_score: float
+    structured_data_score: float
     performance_score: float
     authority_score: float | None
-    aeo_score: float
-    geo_score: float
-    acrs_score: float
     confidence: float
     score_version: str = CURRENT_SCORE_VERSION
     evidence: dict = field(default_factory=dict)
 
 
+def _weighted(components: dict[str, float | None], weights: dict[str, float]) -> float | None:
+    """Combine components under their weights, dropping any with no evidence
+    and rescaling the rest to sum to 1.0.
+
+    A component that could not be measured must not be scored as a zero —
+    that turns "we didn't look" into "you failed", which is the one error
+    this engine exists to avoid. Returns None when nothing was measurable.
+    """
+    present = {k: (v, weights[k]) for k, v in components.items() if v is not None}
+    total_weight = sum(w for _v, w in present.values())
+    if not total_weight:
+        return None
+    return sum(v * (w / total_weight) for v, w in present.values())
+
+
+def _weights_used(components: dict[str, float | None], weights: dict[str, float]) -> dict[str, float]:
+    present = {k: weights[k] for k, v in components.items() if v is not None}
+    total = sum(present.values())
+    return {k: round(w / total, 4) for k, w in present.items()} if total else {}
+
+
+def _rounded(components: dict[str, float | None]) -> dict[str, float | None]:
+    return {k: (round(v, 1) if v is not None else None) for k, v in components.items()}
+
+
 def _category_score(findings: list[RuleFinding], categories: set[str], total_pages: int) -> float:
+    """100 minus a deduction per finding, scaled by how much of the site it
+    affects and how severe it is."""
     if total_pages == 0:
         return 0.0
     deduction = 0.0
@@ -92,8 +200,8 @@ def _performance_score(pages: list[CrawlPage]) -> float:
     return round(100.0 - ((avg_ms - 500) / (5000 - 500)) * 100.0, 2)
 
 
-_ORG_RICH_FIELDS = ("name", "url", "logo", "sameAs")
-
+def _pct(matching: int, total: int) -> float:
+    return 100.0 * matching / total if total else 0.0
 
 
 def _schema_blocks_of_type(pages: list[CrawlPage], type_name: str | frozenset[str]):
@@ -113,168 +221,263 @@ def _schema_blocks_of_type(pages: list[CrawlPage], type_name: str | frozenset[st
                 yield p, block
 
 
-def _question_coverage_pct(indexable: list[CrawlPage]) -> float:
-    return 100 * sum(1 for p in indexable if p.question_heading_count > 0) / len(indexable)
+# --------------------------------------------------------------------------
+# AEO — can an answer engine lift an answer out of this site?
+# --------------------------------------------------------------------------
 
 
-def _structured_content_pct(indexable: list[CrawlPage]) -> float:
-    return 100 * sum(
-        1 for p in indexable if p.list_count > 0 or p.table_count > 0 or p.has_definition_list
-    ) / len(indexable)
+def _nothing_to_score(
+    pages: list[CrawlPage], citation_signals: dict[str, float] | None
+) -> tuple[float | None, dict] | None:
+    """The two ways a score can have no pages under it, which are not the
+    same thing. Returns None when there *is* something to score.
 
+    A site whose every page 500s or is marked noindex has been measured, and
+    the measurement is zero: there is nothing for an answer engine to read.
+    Redistributing that away as "unmeasurable" is how a totally broken site
+    ends up outscoring a working one — it drops exactly the components that
+    noticed the site was broken.
 
-def _byline_coverage_pct(indexable: list[CrawlPage]) -> float:
-    return 100 * sum(1 for p in indexable if p.has_author_byline) / len(indexable)
-
-
-def _aeo_score(pages: list[CrawlPage]) -> tuple[float, dict]:
-    """§48 full AEO composition, all deterministic and re-derivable from
-    stored crawl evidence:
-      - schema coverage (machine-readable structure)
-      - FAQPage schema presence (explicit Q&A structure)
-      - question coverage (headings phrased as natural-language questions —
-        a broader "does this page answer questions" signal than FAQ schema
-        alone, since most sites answer questions in prose H2/H3s, not
-        formal FAQ blocks)
-      - structured-answer readability (lists/tables/definition lists, which
-        answer engines and AI crawlers extract far more reliably than prose)
-      - heading hygiene (exactly one H1, and no skipped ranks below it —
-        answer engines use the H1 to find the page's primary topic and walk
-        the outline beneath it to find the part that answers the question)
-      - source attribution (author/byline markup — §48 "citation
-        readability": AI systems favor content with clear authorship)
+    An audit with no crawled pages at all is the genuinely unmeasurable case,
+    and returns None so the weight moves to the components that do have data.
     """
+    if not [p for p in pages if p.status_code is not None]:
+        return None, {"reason": "no pages were crawled"}
+    if citation_signals is None or not [p for p in pages if p.indexable]:
+        return 0.0, {"reason": "no indexable pages — nothing on this site can be read or cited"}
+    return None
+
+
+def _aeo_score(pages: list[CrawlPage], citation_signals: dict[str, float] | None) -> tuple[float | None, dict]:
+    empty = _nothing_to_score(pages, citation_signals)
+    if empty is not None:
+        return empty
+    citation_signals = citation_signals or {}
+
     indexable = [p for p in pages if p.indexable]
-    if not indexable:
-        return 0.0, {"reason": "no indexable pages"}
+    total = len(indexable)
 
-    schema_coverage_pct = 100 * sum(1 for p in indexable if p.has_schema) / len(indexable)
-    # Both halves matter and this used to count only the first: a page can
-    # have exactly one H1 and still jump H1 -> H3, which breaks the outline
-    # an answer engine walks. Counting only H1s reported 100% "clean" on a
-    # site where 17% of pages skipped a rank, so the score credited hygiene
-    # the site didn't have. `heading_order_valid` is already computed per
-    # page by the parser and used by SEO_CONTENT_007; it just wasn't
-    # reaching the score.
-    clean_heading_pct = 100 * sum(
-        1 for p in indexable if p.h1_count == 1 and p.heading_order_valid
-    ) / len(indexable)
-    question_coverage_pct = _question_coverage_pct(indexable)
-    structured_content_pct = _structured_content_pct(indexable)
-    byline_coverage_pct = _byline_coverage_pct(indexable)
-    has_faq_schema = any("FAQPage" in (p.schema_types or []) for p in pages)
-
-    score = (
-        0.20 * schema_coverage_pct
-        + 0.15 * clean_heading_pct
-        + 0.15 * question_coverage_pct
-        + 0.20 * structured_content_pct
-        + 0.15 * byline_coverage_pct
-        + 0.15 * (100 if has_faq_schema else 40)
+    # Poses a question (or offers a definition/table) *and* has at least one
+    # paragraph that survives being lifted away from its neighbours. Either
+    # half alone is not an answer: a question with only context-dependent
+    # prose under it cannot be quoted, and a liftable paragraph nobody asked
+    # a question about will not be matched to a query.
+    answerability = _pct(
+        sum(
+            1
+            for p in indexable
+            if ((p.question_heading_count or 0) > 0 or p.has_definition_list or (p.table_count or 0) > 0)
+            and (p.self_contained_paragraph_count or 0) > 0
+        ),
+        total,
     )
-    return round(score, 2), {
-        "schema_coverage_pct": round(schema_coverage_pct, 1),
-        "clean_heading_pct": round(clean_heading_pct, 1),
-        "question_coverage_pct": round(question_coverage_pct, 1),
-        "structured_content_pct": round(structured_content_pct, 1),
-        "byline_coverage_pct": round(byline_coverage_pct, 1),
-        "has_faq_schema": has_faq_schema,
+
+    question_coverage = _pct(sum(1 for p in indexable if (p.question_heading_count or 0) > 0), total)
+    structured_answers = _pct(
+        sum(1 for p in indexable if p.list_count > 0 or p.table_count > 0 or p.has_definition_list),
+        total,
+    )
+    schema_support = _pct(sum(1 for p in indexable if p.has_schema), total)
+
+    # Of the pages that actually pose questions, how many mark them up so a
+    # machine knows they are questions? Sites that answer nothing in question
+    # form have no FAQ markup to be missing, so this is unmeasurable there
+    # rather than a failure — a product catalogue is not worse for having no
+    # FAQPage schema.
+    question_pages = [p for p in indexable if (p.question_heading_count or 0) > 0]
+    faq_implementation = (
+        _pct(
+            sum(1 for p in question_pages if _FAQ_SCHEMA_TYPES.intersection(p.schema_types or [])),
+            len(question_pages),
+        )
+        if question_pages
+        else None
+    )
+
+    components: dict[str, float | None] = {
+        "answerability": answerability,
+        "question_coverage": question_coverage,
+        # Measured once in the ACRS engine and reused, so the two cannot
+        # report different numbers for the same signal.
+        "passage_extraction": citation_signals["passage_extractability"],
+        "structured_answers": structured_answers,
+        "schema_support": schema_support,
+        "faq_implementation": faq_implementation,
+        "entity_clarity": citation_signals["entity_clarity"],
     }
+    score = _weighted(components, AEO_COMPONENT_WEIGHTS)
+    evidence = {
+        "components": _rounded(components),
+        "weights_used": _weights_used(components, AEO_COMPONENT_WEIGHTS),
+        "pages_scored": total,
+        "pages_posing_questions": len(question_pages),
+    }
+    if faq_implementation is None:
+        evidence["not_measured"] = [
+            "faq_implementation — no page on this site poses a question in a heading, "
+            "so there is no Q&A content for FAQ markup to be missing from"
+        ]
+    return (round(score, 2) if score is not None else None), evidence
+
+
+# --------------------------------------------------------------------------
+# GEO — can a generative system tell who wrote this and reuse it?
+# --------------------------------------------------------------------------
+
+
+def _brand_consistency_pct(pages: list[CrawlPage]) -> float | None:
+    """How much of the site agrees on what the organization is called.
+
+    The share of named Organization blocks carrying the most common name —
+    so one stray variant on a 40-page site reads as a 97% consistent brand,
+    not a failed one, while a site genuinely split between two names lands
+    near 50%.
+    """
+    names = Counter(
+        block["name"]
+        for _p, block in _schema_blocks_of_type(pages, ORGANIZATION_TYPES)
+        if isinstance(block.get("name"), str) and block["name"].strip()
+    )
+    if not names:
+        return None
+    return 100.0 * names.most_common(1)[0][1] / sum(names.values())
+
+
+def _knowledge_graph_pct(pages: list[CrawlPage]) -> float | None:
+    """Of the fields that let a knowledge graph resolve this entity to a real
+    one — an @id to key it on, sameAs profiles to corroborate it, a URL and a
+    logo — how many are actually present?"""
+    orgs = list(_schema_blocks_of_type(pages, ORGANIZATION_TYPES))
+    if not orgs:
+        return None
+    present = sum(1 for _p, block in orgs for f in _KNOWLEDGE_GRAPH_FIELDS if block.get(f))
+    return _pct(present, len(_KNOWLEDGE_GRAPH_FIELDS) * len(orgs))
 
 
 def _org_field_completeness_pct(pages: list[CrawlPage]) -> float | None:
     orgs = list(_schema_blocks_of_type(pages, ORGANIZATION_TYPES))
     if not orgs:
         return None
-    total_fields = len(_ORG_RICH_FIELDS) * len(orgs)
     present = sum(1 for _p, block in orgs for f in _ORG_RICH_FIELDS if block.get(f))
-    return 100 * present / total_fields
+    return _pct(present, len(_ORG_RICH_FIELDS) * len(orgs))
 
 
-def _entity_name_consistency_pct(pages: list[CrawlPage]) -> float | None:
-    names = {block["name"] for _p, block in _schema_blocks_of_type(pages, ORGANIZATION_TYPES) if block.get("name")}
-    if not names:
-        return None
-    return 100.0 if len(names) == 1 else 0.0
+def _topical_authority_pct(indexable: list[CrawlPage]) -> float:
+    """The on-site half of topical authority: does this site cover its
+    subject in depth, and across enough pages to constitute coverage?
 
-
-def _citation_readiness_pct(indexable: list[CrawlPage], links: list[PageLink] | None) -> float:
-    if not links:
-        return 0.0
-    pages_with_outbound_citation = {link.source_page_id for link in links if not link.is_internal}
-    return 100 * sum(1 for p in indexable if p.id in pages_with_outbound_citation) / len(indexable)
-
-
-def _geo_score(pages: list[CrawlPage], links: list[PageLink] | None = None) -> tuple[float, dict]:
-    """§49 full GEO composition, all deterministic and re-derivable from
-    stored crawl evidence:
-      - Organization-entity presence (is there a declared entity at all)
-      - Organization field completeness (name/url/logo/sameAs — a bare
-        `{"@type":"Organization"}` is a much weaker entity signal than one
-        with a logo and verified social profiles via sameAs)
-      - entity-name consistency across pages (a brand that names itself
-        differently on different pages is an inconsistent entity signal
-        that confuses AI systems about who they're citing — same check the
-        SEO_SCHEMA_007 rule flags, reused here as a score input)
-      - Person/Product/Service schema presence (a richer entity graph
-        beyond just the organization itself)
-      - machine-readable structure (overall schema coverage)
-      - citation readiness (pages that link out to external sources, which
-        AI answer engines weight as an evidence/citation signal, §49)
-
-    Components with no evidence anywhere on the site (no Organization schema
-    at all, so completeness/consistency are undefined rather than "zero")
-    are dropped and the remaining weights rescaled — the same pattern
-    `_redistribute_weights` uses for the top-level Spy Score, so an
-    unmeasured signal is never silently scored as a failure.
+    Depth without breadth is a single good essay; breadth without depth is a
+    sitemap of stubs. Neither is authority, so the two are multiplied rather
+    than averaged. The off-site half — whether the rest of the web treats
+    this site as an authority — needs a backlink corpus Spy does not have,
+    and is not claimed here.
     """
-    indexable = [p for p in pages if p.indexable]
     if not indexable:
-        return 0.0, {"reason": "no indexable pages"}
-
-    has_org_schema = any(ORGANIZATION_TYPES.intersection(p.schema_types or []) for p in pages)
-    schema_coverage_pct = 100 * sum(1 for p in indexable if p.has_schema) / len(indexable)
-    org_completeness_pct = _org_field_completeness_pct(pages)
-    entity_consistency_pct = _entity_name_consistency_pct(pages)
-    has_entity_schema = any(
-        t in (p.schema_types or []) for p in pages for t in ("Person", "Product", "Service")
+        return 0.0
+    substantive = [p for p in indexable if (p.word_count or 0) >= SUBSTANTIVE_PAGE_WORDS]
+    depth = _pct(len(substantive), len(indexable))
+    breadth = min(
+        1.0, math.log10(len(substantive) + 1) / math.log10(TOPICAL_BREADTH_TARGET + 1)
     )
-    citation_readiness_pct = _citation_readiness_pct(indexable, links)
+    return depth * breadth
 
-    components: dict[str, tuple[float | None, float]] = {
-        "org_presence": (100.0 if has_org_schema else 30.0, 0.20),
-        "schema_coverage": (schema_coverage_pct, 0.15),
-        "org_completeness": (org_completeness_pct, 0.20),
-        "entity_consistency": (entity_consistency_pct, 0.15),
-        "entity_schema": (100.0 if has_entity_schema else 40.0, 0.15),
-        "citation_readiness": (citation_readiness_pct, 0.15),
+
+def _geo_score(
+    pages: list[CrawlPage], citation_signals: dict[str, float] | None
+) -> tuple[float | None, dict]:
+    empty = _nothing_to_score(pages, citation_signals)
+    if empty is not None:
+        return empty
+    citation_signals = citation_signals or {}
+
+    indexable = [p for p in pages if p.indexable]
+    total = len(indexable)
+
+    # Half for declaring an organization at all, half for how much of the
+    # site carries any identifiable entity. A site with Organization schema
+    # on the homepage alone is recognisable; one that identifies the subject
+    # of every page is unambiguous.
+    has_org_schema = any(ORGANIZATION_TYPES.intersection(p.schema_types or []) for p in pages)
+    entity_page_pct = _pct(
+        sum(
+            1
+            for p in indexable
+            if (ORGANIZATION_TYPES | _ENTITY_SCHEMA_TYPES).intersection(p.schema_types or [])
+        ),
+        total,
+    )
+    entity_recognition = (50.0 if has_org_schema else 0.0) + 0.5 * entity_page_pct
+
+    schema_coverage = _pct(sum(1 for p in indexable if p.has_schema), total)
+    clean_headings = _pct(
+        sum(1 for p in indexable if p.h1_count == 1 and p.heading_order_valid), total
+    )
+    structured_content = _pct(
+        sum(1 for p in indexable if p.list_count > 0 or p.table_count > 0 or p.has_definition_list),
+        total,
+    )
+    ai_readable_structure = (schema_coverage + clean_headings + structured_content) / 3
+
+    components: dict[str, float | None] = {
+        "entity_recognition": entity_recognition,
+        # Can a passage be lifted out and quoted whole? That is what makes a
+        # page citable, and it is measured once in the ACRS engine.
+        "citation_readiness": citation_signals["passage_extractability"],
+        "fact_density": citation_signals["fact_density"],
+        "brand_consistency": _brand_consistency_pct(pages),
+        "source_attribution": citation_signals["source_attribution"],
+        "knowledge_graph_signals": _knowledge_graph_pct(pages),
+        "topical_authority": _topical_authority_pct(indexable),
+        "author_transparency": citation_signals["author_transparency"],
+        "ai_readable_structure": ai_readable_structure,
+        "original_information_gain": None,
     }
-    present = {k: (v, w) for k, (v, w) in components.items() if v is not None}
-    total_weight = sum(w for _v, w in present.values())
-    score = sum(v * (w / total_weight) for v, w in present.values())
+    score = _weighted(components, GEO_COMPONENT_WEIGHTS)
 
-    return round(score, 2), {
+    not_measured = [
+        "original_information_gain — requires a corpus to compare this site's "
+        "content against; no amount of markup analysis establishes it",
+    ]
+    if components["brand_consistency"] is None:
+        not_measured.append(
+            "brand_consistency — no Organization schema declares a name to be consistent about"
+        )
+    if components["knowledge_graph_signals"] is None:
+        not_measured.append(
+            "knowledge_graph_signals — no Organization schema found to inspect"
+        )
+
+    evidence = {
+        "components": _rounded(components),
+        "weights_used": _weights_used(components, GEO_COMPONENT_WEIGHTS),
+        "pages_scored": total,
         "has_organization_schema": has_org_schema,
-        "schema_coverage_pct": round(schema_coverage_pct, 1),
-        "org_field_completeness_pct": round(org_completeness_pct, 1) if org_completeness_pct is not None else None,
-        "entity_name_consistency_pct": entity_consistency_pct,
-        "has_person_or_product_schema": has_entity_schema,
-        "citation_readiness_pct": round(citation_readiness_pct, 1),
+        "org_field_completeness_pct": _rounded({"v": _org_field_completeness_pct(pages)})["v"],
+        "topical_authority_caveat": (
+            "on-site depth and breadth only; whether the wider web treats this site "
+            "as an authority is not measured"
+        ),
+        "not_measured": not_measured,
     }
+    return (round(score, 2) if score is not None else None), evidence
 
 
-def _authority_score(pages: list[CrawlPage], *, referring_domains: int, total_backlinks: int) -> tuple[float | None, dict]:
-    """§144/M5 — Spy Authority, built from real evidence Spy now has:
-    internal PageRank distribution (this audit's own crawl) and Spy's own
+# --------------------------------------------------------------------------
+# Authority — SEO's smallest component, and the one most often unmeasurable
+# --------------------------------------------------------------------------
+
+
+def _authority_score(
+    pages: list[CrawlPage], *, referring_domains: int, total_backlinks: int
+) -> tuple[float | None, dict]:
+    """Built from internal PageRank (this audit's own crawl) and Spy's
     crawl-derived backlink index (app/modules/backlinks). That index only
-    contains domains Spy has *already* crawled while auditing someone
-    else's site — a brand-new domain, or one nobody happens to have linked
-    to from an already-audited site yet, will show zero referring domains
-    regardless of its real-world backlink profile. Reporting a low score
-    in that case would manufacture a negative signal indistinguishable
-    from "genuinely has no backlinks" (§3) — so this returns None (like
-    the M1-M4 "no data source" case it replaces) until there is at least
-    one real referring domain to base a number on.
+    contains domains Spy has *already* crawled while auditing someone else's
+    site, so a brand-new domain shows zero referring domains regardless of
+    its real backlink profile. Reporting a low score there would manufacture
+    a negative signal indistinguishable from "genuinely has no backlinks"
+    (§3), so it returns None until there is at least one real referring
+    domain to base a number on.
     """
     if referring_domains == 0:
         return None, {
@@ -302,15 +505,7 @@ def _authority_score(pages: list[CrawlPage], *, referring_domains: int, total_ba
     }
 
 
-def _redistribute_weights(available: dict[str, float | None]) -> dict[str, float]:
-    """Drop components with no data (currently just `authority` in M1) and
-    scale the remaining weights back up to sum to 1.0, rather than silently
-    treating a missing component as a zero (which would unfairly tank the
-    overall score for something the audit never measured).
-    """
-    present = {k: w for k, w in COMPONENT_WEIGHTS.items() if available.get(k) is not None}
-    total = sum(present.values())
-    return {k: w / total for k, w in present.items()}
+# --------------------------------------------------------------------------
 
 
 def compute_spy_score(
@@ -326,53 +521,63 @@ def compute_spy_score(
     total_pages = len([p for p in pages if p.status_code is not None]) or 1
 
     technical = _category_score(findings, _TECHNICAL_CATEGORIES, total_pages)
-    seo = _category_score(findings, _ONPAGE_CATEGORIES, total_pages)
+    onpage = _category_score(findings, _ONPAGE_CATEGORIES, total_pages)
     content = _category_score(findings, _CONTENT_CATEGORIES, total_pages)
-    architecture = _category_score(findings, _ARCHITECTURE_CATEGORIES, total_pages)
+    internal_links = _category_score(findings, _INTERNAL_LINK_CATEGORIES, total_pages)
+    structured_data = _category_score(findings, _STRUCTURED_DATA_CATEGORIES, total_pages)
     performance = _performance_score(pages)
     authority, authority_evidence = _authority_score(
         pages, referring_domains=referring_domains, total_backlinks=total_backlinks
     )
-    aeo, aeo_evidence = _aeo_score(pages)
-    geo, geo_evidence = _geo_score(pages, links)
-    # ACRS is reported alongside the composite rather than inside it: it
-    # asks a different question (would a generative system quote this?) and
-    # folding it in would change what spy_score has always meant.
-    acrs, acrs_evidence = compute_acrs(pages, links)
 
-    # "architecture" (internal linking/orphans/depth, §21's "Internal
-    # architecture" weight) contributes to the composite but has no
-    # dedicated Audit column — the dashboard doesn't show it as its own
-    # card (§20 only lists Spy/SEO/Technical/Content/Performance/Authority/
-    # AEO/GEO) — so it lives in `evidence` for anyone who wants the detail.
-    components = {
-        "technical": technical, "onpage": seo, "content": content,
-        "performance": performance, "architecture": architecture,
-        "authority": authority, "aeo": aeo, "geo": geo,
+    seo_components: dict[str, float | None] = {
+        "technical": technical,
+        "onpage": onpage,
+        "content": content,
+        "internal_links": internal_links,
+        "structured_data": structured_data,
+        "performance": performance,
+        "authority": authority,
     }
-    weights = _redistribute_weights(components)
-    spy_score = round(sum(components[k] * w for k, w in weights.items()), 2)
+    seo = round(_weighted(seo_components, SEO_COMPONENT_WEIGHTS) or 0.0, 2)
+
+    # Measured once and shared: ACRS, AEO and GEO all read from the same
+    # citation signals, so "fact density" cannot mean two different things
+    # in two different sections of the same report.
+    citation_signals = measure_citation_signals(pages, links)
+    acrs = round(score_from_components(citation_signals), 2) if citation_signals else 0.0
+    aeo, aeo_evidence = _aeo_score(pages, citation_signals)
+    geo, geo_evidence = _geo_score(pages, citation_signals)
+
+    search_components: dict[str, float | None] = {"seo": seo, "aeo": aeo, "geo": geo}
+    spy_score = round(_weighted(search_components, SEARCH_SCORE_WEIGHTS) or 0.0, 2)
 
     confidence = round(100 * min(1.0, urls_processed / target_sample_size), 2)
 
     return ScoreBreakdown(
         spy_score=spy_score,
-        technical_score=technical,
         seo_score=seo,
-        content_score=content,
-        performance_score=performance,
-        authority_score=authority,
         aeo_score=aeo,
         geo_score=geo,
         acrs_score=acrs,
+        technical_score=technical,
+        onpage_score=onpage,
+        content_score=content,
+        internal_links_score=internal_links,
+        structured_data_score=structured_data,
+        performance_score=performance,
+        authority_score=authority,
         confidence=confidence,
         evidence={
-            "weights_used": weights,
-            "architecture_score": architecture,
+            "search_weights_used": _weights_used(search_components, SEARCH_SCORE_WEIGHTS),
+            "seo": {
+                "components": _rounded(seo_components),
+                "weights_used": _weights_used(seo_components, SEO_COMPONENT_WEIGHTS),
+            },
             "authority": authority_evidence,
             "aeo": aeo_evidence,
             "geo": geo_evidence,
-            "acrs": acrs_evidence,
+            "acrs": evidence_from_components(citation_signals, acrs),
             "total_pages_scored": total_pages,
             "urls_processed": urls_processed,
         },

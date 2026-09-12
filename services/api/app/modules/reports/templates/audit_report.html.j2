@@ -31,18 +31,67 @@
   <h1>Spy Audit Report</h1>
   <div class="muted">{{ project.domain }} &middot; Generated {{ generated_at }} &middot; Score methodology {{ audit.score_version }}</div>
 
-  <h2>Spy Score</h2>
+  <h2>Overall Digital Search Score</h2>
   <div class="score-grid">
-    <div class="score-card"><div class="value {{ band_class }}">{{ audit.spy_score }}</div><div class="label">Spy Score</div></div>
-    <div class="score-card"><div class="value">{{ audit.technical_score }}</div><div class="label">Technical</div></div>
-    <div class="score-card"><div class="value">{{ audit.seo_score }}</div><div class="label">SEO</div></div>
-    <div class="score-card"><div class="value">{{ audit.content_score }}</div><div class="label">Content</div></div>
-    <div class="score-card"><div class="value">{{ audit.performance_score }}</div><div class="label">Performance</div></div>
-    <div class="score-card"><div class="value">{{ audit.authority_score if audit.authority_score is not none else "N/A" }}</div><div class="label">Authority</div></div>
-    <div class="score-card"><div class="value">{{ audit.aeo_score }}</div><div class="label">AEO</div></div>
-    <div class="score-card"><div class="value">{{ audit.geo_score }}</div><div class="label">GEO</div></div>
+    <div class="score-card"><div class="value {{ band_class }}">{{ audit.spy_score }}</div><div class="label">Overall</div></div>
+    <div class="score-card"><div class="value">{{ audit.seo_score if audit.seo_score is not none else "N/A" }}</div><div class="label">SEO</div></div>
+    <div class="score-card"><div class="value">{{ audit.aeo_score if audit.aeo_score is not none else "N/A" }}</div><div class="label">AEO</div></div>
+    <div class="score-card"><div class="value">{{ audit.geo_score if audit.geo_score is not none else "N/A" }}</div><div class="label">GEO</div></div>
   </div>
-  <p class="muted">Confidence: {{ audit.confidence }}% (based on {{ evidence.urls_processed }} pages crawled)</p>
+  <p class="muted">
+    SEO is whether a search engine can crawl, index and rank the site; AEO whether an answer
+    engine can lift an answer out of it; GEO whether a generative system can tell who wrote it
+    and reuse it. Confidence: {{ audit.confidence }}% (based on {{ evidence.urls_processed }} pages crawled).
+  </p>
+
+  <h2>SEO breakdown</h2>
+  <div class="score-grid">
+    <div class="score-card"><div class="value">{{ audit.technical_score }}</div><div class="label">Technical &middot; 25%</div></div>
+    <div class="score-card"><div class="value">{{ audit.onpage_score }}</div><div class="label">On-page &middot; 20%</div></div>
+    <div class="score-card"><div class="value">{{ audit.content_score }}</div><div class="label">Content &middot; 20%</div></div>
+    <div class="score-card"><div class="value">{{ audit.internal_links_score }}</div><div class="label">Internal links &middot; 10%</div></div>
+    <div class="score-card"><div class="value">{{ audit.structured_data_score }}</div><div class="label">Structured data &middot; 10%</div></div>
+    <div class="score-card"><div class="value">{{ audit.performance_score }}</div><div class="label">Performance &middot; 10%</div></div>
+    <div class="score-card"><div class="value">{{ audit.authority_score if audit.authority_score is not none else "N/A" }}</div><div class="label">Authority &middot; 5%</div></div>
+    <div class="score-card"><div class="value">{{ audit.acrs_score if audit.acrs_score is not none else "N/A" }}</div><div class="label">ACRS (reported separately)</div></div>
+  </div>
+  {% if audit.authority_score is none %}
+  <p class="muted">Authority is reported as not measured, not as zero: Spy's backlink index is
+  built from its own crawls and has nothing for this domain yet. Its weight is redistributed
+  across the other six components rather than counted as a failure.</p>
+  {% endif %}
+
+  {% if evidence.get('aeo', {}).get('components') %}
+  <h2>AEO breakdown</h2>
+  <table>
+    <thead><tr><th>Signal</th><th>Score</th></tr></thead>
+    <tbody>
+      {% for name, value in evidence['aeo']['components'].items() %}
+      <tr><td>{{ name.replace('_', ' ')|title }}</td><td>{{ value if value is not none else "Not measured" }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% if evidence.get('geo', {}).get('components') %}
+  <h2>GEO breakdown</h2>
+  <table>
+    <thead><tr><th>Dimension</th><th>Score</th></tr></thead>
+    <tbody>
+      {% for name, value in evidence['geo']['components'].items() %}
+      <tr><td>{{ name.replace('_', ' ')|title }}</td><td>{{ value if value is not none else "Not measured" }}</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
+  {% set unmeasured = (evidence.get('geo', {}).get('not_measured') or []) + (evidence.get('aeo', {}).get('not_measured') or []) %}
+  {% if unmeasured %}
+  <h2>What was not measured</h2>
+  <ul>
+    {% for reason in unmeasured %}<li>{{ reason }}</li>{% endfor %}
+  </ul>
+  {% endif %}
 
   <h2>Critical Issues ({{ issues|length }})</h2>
   <table>

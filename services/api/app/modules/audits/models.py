@@ -11,7 +11,10 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.base import Base, TimestampMixin, UUIDPKMixin
 
-CURRENT_SCORE_VERSION = "spy-score-v1.0"
+# One definition, in the engine that owns it. This used to be declared here
+# *and* in spy_score.py, so bumping the version in one place would have left
+# every new audit stamped with the old one.
+from app.modules.scoring.spy_score import CURRENT_SCORE_VERSION
 
 
 class AuditStatus(StrEnum):
@@ -80,15 +83,27 @@ class Audit(UUIDPKMixin, TimestampMixin, Base):
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
+    # The three headline scores and the number that combines them. Under
+    # spy-score-v2.0 `spy_score` is the Overall Digital Search Score and
+    # `seo_score` is the seven-component SEO score; under v1.0 the same two
+    # columns meant "one composite including AEO/GEO" and "on-page only".
+    # Comparing across versions is therefore refused, not silently done
+    # (app/modules/audits/service.py).
     spy_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
-    technical_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
-    seo_score: Mapped[float | None] = mapped_column(Numeric(5, 2))  # §20 "SEO Score" card (on-page + images + schema)
-    content_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
-    performance_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
-    authority_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    seo_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     aeo_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     geo_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     acrs_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+
+    # The seven components of seo_score, each out of 100.
+    technical_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    onpage_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    content_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    internal_links_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    structured_data_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    performance_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    authority_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+
     confidence: Mapped[float | None] = mapped_column(Numeric(5, 2))
 
     # §21: "Scores must include: score, confidence, evidence, affected_pages,

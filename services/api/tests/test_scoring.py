@@ -1,15 +1,30 @@
-"""§21/§22 Spy Score — pure, reproducible from stored evidence.
+"""§21/§22 the three scores and the one that combines them — pure, and
+reproducible from stored evidence.
 
 The golden-fixture test is the reproducibility guarantee itself: the exact
 same crawl evidence must always yield the exact same score under one
 score_version, or §22/§132 (immutable, versioned scoring) is meaningless.
+
+Note what `_clean_site` actually is: a site with clean *SEO*. It has titles,
+descriptions, canonicals and schema, and that is all the SEO score asks for.
+It is not thereby a citable site — it has no statistics, no dates, no FAQ
+markup and nothing long enough to constitute depth — and the AEO and GEO
+scores are supposed to say so. That separation is the point of the v2
+restructure, so the tests below assert each score against what it measures
+rather than expecting one number to be high everywhere.
 """
 from __future__ import annotations
 
 import uuid
 
 from app.modules.crawler.models import CrawlPage, PageLink
-from app.modules.scoring.spy_score import compute_spy_score
+from app.modules.scoring.spy_score import (
+    AEO_COMPONENT_WEIGHTS,
+    GEO_COMPONENT_WEIGHTS,
+    SEARCH_SCORE_WEIGHTS,
+    SEO_COMPONENT_WEIGHTS,
+    compute_spy_score,
+)
 from app.modules.seo.rules import run_all_rules
 
 
@@ -69,13 +84,19 @@ def _clean_site(n: int = 5) -> list[CrawlPage]:
 
 
 def _citation_links(pages: list[CrawlPage]) -> list[PageLink]:
-    """One outbound external link per page — the §49 citation-readiness signal."""
+    """One outbound external link per page, each to a *different* source.
+
+    Distinct targets matter: a single URL linked from most of the site is
+    boilerplate, and the ACRS engine excludes it on purpose (one shared
+    footer link would otherwise score a site 100% for citing its own
+    LinkedIn). Real citations point somewhere page-specific.
+    """
     return [
         PageLink(
             id=uuid.uuid4(), audit_id=p.audit_id, source_page_id=p.id,
-            target_url="https://external-source.example/article", is_internal=False,
+            target_url=f"https://external-source.example/article-{i}", is_internal=False,
         )
-        for p in pages
+        for i, p in enumerate(pages)
     ]
 
 
@@ -95,48 +116,80 @@ def _broken_site(n: int = 5) -> list[CrawlPage]:
     ]
 
 
-def test_perfect_site_scores_high() -> None:
+def _score(pages, **kwargs):
+    links = kwargs.pop("links", None)
+    return compute_spy_score(
+        pages=pages, findings=run_all_rules(pages, links or []),
+        urls_processed=len(pages), links=links, **kwargs,
+    )
+
+
+# --------------------------------------------------------------------------
+# Composition — what each score is made of
+# --------------------------------------------------------------------------
+
+
+def test_every_weight_set_sums_to_one() -> None:
+    for weights in (
+        SEARCH_SCORE_WEIGHTS, SEO_COMPONENT_WEIGHTS, AEO_COMPONENT_WEIGHTS, GEO_COMPONENT_WEIGHTS
+    ):
+        assert abs(sum(weights.values()) - 1.0) < 1e-9
+
+
+def test_seo_has_seven_components_and_aeo_geo_are_not_among_them() -> None:
+    """The restructure in one assertion. AEO and GEO used to be 10% slices of
+    a single composite, so being excellent at either moved the headline
+    number by almost nothing, and a reader could not tell a ranking problem
+    from a citability problem."""
+    assert len(SEO_COMPONENT_WEIGHTS) == 7
+    assert "aeo" not in SEO_COMPONENT_WEIGHTS
+    assert "geo" not in SEO_COMPONENT_WEIGHTS
+    assert set(SEARCH_SCORE_WEIGHTS) == {"seo", "aeo", "geo"}
+
+
+def test_overall_score_is_the_weighted_sum_of_the_three() -> None:
     pages = _clean_site()
-    findings = run_all_rules(pages, [])
-    score = compute_spy_score(pages=pages, findings=findings, urls_processed=len(pages), links=_citation_links(pages))
-    assert score.spy_score >= 90, f"expected a clean, schema-complete site to score highly, got {score.spy_score}"
-    assert score.authority_score is None, "authority has no M1 data source and must not be guessed"
-
-
-def test_broken_site_scores_much_lower_than_clean_site() -> None:
-    clean_pages = _clean_site()
-    clean_findings = run_all_rules(clean_pages, [])
-    clean_score = compute_spy_score(
-        pages=clean_pages, findings=clean_findings, urls_processed=5, links=_citation_links(clean_pages)
+    score = _score(pages, links=_citation_links(pages))
+    expected = (
+        SEARCH_SCORE_WEIGHTS["seo"] * score.seo_score
+        + SEARCH_SCORE_WEIGHTS["aeo"] * score.aeo_score
+        + SEARCH_SCORE_WEIGHTS["geo"] * score.geo_score
     )
+    assert abs(score.spy_score - expected) < 0.01
 
-    broken_pages = _broken_site()
-    broken_findings = run_all_rules(broken_pages, [])
-    broken_score = compute_spy_score(pages=broken_pages, findings=broken_findings, urls_processed=5)
 
-    assert broken_score.spy_score < clean_score.spy_score - 20, (
-        f"expected a badly broken site ({broken_score.spy_score}) to score well below "
-        f"a clean one ({clean_score.spy_score})"
-    )
+def test_seo_is_the_weighted_sum_of_its_components() -> None:
+    score = _score(_clean_site())
+    components = score.evidence["seo"]["components"]
+    weights = score.evidence["seo"]["weights_used"]
+    expected = sum(components[k] * w for k, w in weights.items())
+    assert abs(score.seo_score - expected) < 0.05
+
+
+def test_clean_seo_site_scores_high_on_seo() -> None:
+    pages = _clean_site()
+    score = _score(pages, links=_citation_links(pages))
+    assert score.seo_score >= 90, f"expected clean SEO evidence to score highly, got {score.seo_score}"
+    assert score.authority_score is None, "authority has no data source here and must not be guessed"
+
+
+def test_clean_seo_does_not_imply_a_citable_site() -> None:
+    """A site can be technically immaculate and still give a generative
+    system nothing to work with. If AEO and GEO simply tracked SEO they would
+    not be worth computing separately."""
+    pages = _clean_site()
+    score = _score(pages, links=_citation_links(pages))
+    assert score.seo_score > score.aeo_score
+    assert score.seo_score > score.geo_score
 
 
 def test_score_is_reproducible_for_identical_evidence() -> None:
     pages = _clean_site()
-    findings1 = run_all_rules(pages, [])
-    findings2 = run_all_rules(pages, [])
-    score1 = compute_spy_score(pages=pages, findings=findings1, urls_processed=len(pages), links=_citation_links(pages))
-    score2 = compute_spy_score(pages=pages, findings=findings2, urls_processed=len(pages), links=_citation_links(pages))
-    assert score1.spy_score == score2.spy_score
-    assert score1.evidence == score2.evidence
-
-
-def test_weights_are_renormalized_without_authority() -> None:
-    pages = _clean_site()
-    findings = run_all_rules(pages, [])
-    score = compute_spy_score(pages=pages, findings=findings, urls_processed=len(pages))
-    weights = score.evidence["weights_used"]
-    assert "authority" not in weights
-    assert abs(sum(weights.values()) - 1.0) < 1e-9
+    links = _citation_links(pages)
+    first = _score(pages, links=links)
+    second = _score(pages, links=links)
+    assert first.spy_score == second.spy_score
+    assert first.evidence == second.evidence
 
 
 def test_confidence_scales_with_crawl_coverage() -> None:
@@ -148,11 +201,50 @@ def test_confidence_scales_with_crawl_coverage() -> None:
     assert high.confidence == 100.0
 
 
-def test_aeo_score_rewards_question_headings_structured_content_and_bylines() -> None:
-    """§48 full AEO: question coverage, structured content and bylines are
-    real signals extracted by the crawler (parser.py), not guessed — a page
-    with none of them must score lower than one with all of them.
+# --------------------------------------------------------------------------
+# A broken site must score badly, not become unmeasurable
+# --------------------------------------------------------------------------
+
+
+def test_broken_site_scores_much_lower_than_clean_site() -> None:
+    clean = _clean_site()
+    clean_score = _score(clean, links=_citation_links(clean))
+    broken_score = _score(_broken_site())
+    assert broken_score.spy_score < clean_score.spy_score - 20, (
+        f"expected a badly broken site ({broken_score.spy_score}) to score well below "
+        f"a clean one ({clean_score.spy_score})"
+    )
+
+
+def test_a_site_with_nothing_indexable_scores_zero_not_unmeasured() -> None:
+    """Regression from the v2 restructure: treating "no indexable pages" as
+    missing evidence redistributed AEO and GEO out of the overall score
+    entirely, so a site where every page returned 500 outscored a working
+    one — it dropped exactly the components that had noticed the site was
+    broken. Nothing indexable is a measurement, and the measurement is zero.
     """
+    score = _score(_broken_site())
+    assert score.aeo_score == 0.0
+    assert score.geo_score == 0.0
+    assert "no indexable pages" in score.evidence["aeo"]["reason"]
+
+
+def test_an_empty_crawl_is_unmeasurable_rather_than_zero() -> None:
+    """The other direction: with nothing crawled there is no evidence either
+    way, and inventing a zero would be indistinguishable from a real
+    finding."""
+    score = compute_spy_score(pages=[], findings=[], urls_processed=0)
+    assert score.aeo_score is None
+    assert score.geo_score is None
+    assert "aeo" not in score.evidence["search_weights_used"]
+
+
+# --------------------------------------------------------------------------
+# AEO — can an answer engine lift an answer out of this site?
+# --------------------------------------------------------------------------
+
+
+def test_aeo_rewards_question_headings_and_structured_content() -> None:
     rich_pages = _clean_site()
     plain_pages = [
         _page(
@@ -163,138 +255,143 @@ def test_aeo_score_rewards_question_headings_structured_content_and_bylines() ->
         )
         for p in rich_pages
     ]
+    rich, plain = _score(rich_pages), _score(plain_pages)
 
-    rich_score = compute_spy_score(pages=rich_pages, findings=run_all_rules(rich_pages, []), urls_processed=len(rich_pages))
-    plain_score = compute_spy_score(pages=plain_pages, findings=run_all_rules(plain_pages, []), urls_processed=len(plain_pages))
-
-    assert rich_score.aeo_score > plain_score.aeo_score
-    assert rich_score.evidence["aeo"]["question_coverage_pct"] == 100.0
-    assert plain_score.evidence["aeo"]["question_coverage_pct"] == 0.0
-    assert rich_score.evidence["aeo"]["structured_content_pct"] == 100.0
-    assert plain_score.evidence["aeo"]["structured_content_pct"] == 0.0
-    assert rich_score.evidence["aeo"]["byline_coverage_pct"] == 100.0
-    assert plain_score.evidence["aeo"]["byline_coverage_pct"] == 0.0
+    assert rich.aeo_score > plain.aeo_score
+    assert rich.evidence["aeo"]["components"]["question_coverage"] == 100.0
+    assert plain.evidence["aeo"]["components"]["question_coverage"] == 0.0
+    assert rich.evidence["aeo"]["components"]["structured_answers"] == 100.0
+    assert plain.evidence["aeo"]["components"]["structured_answers"] == 0.0
 
 
-def test_geo_score_penalizes_inconsistent_organization_names() -> None:
-    """§49 entity consistency: the same brand naming itself differently on
-    different pages is a real inconsistency signal (mirrors the
-    SEO_SCHEMA_007 rule's own check), not a manufactured penalty.
-    """
-    consistent_pages = _clean_site()
-    inconsistent_pages = _clean_site()
-    inconsistent_pages[-1].schema_blocks = [
+def test_answerability_needs_both_a_question_and_a_liftable_answer() -> None:
+    """A question with only context-dependent prose under it cannot be
+    quoted; a liftable paragraph nobody asked a question about will not be
+    matched to a query. Either half alone is not an answer."""
+    both = _clean_site(3)
+    for p in both:
+        p.paragraph_count, p.self_contained_paragraph_count = 4, 3
+
+    question_only = _clean_site(3)
+    for p in question_only:
+        p.paragraph_count, p.self_contained_paragraph_count = 4, 0
+
+    assert _score(both).evidence["aeo"]["components"]["answerability"] == 100.0
+    assert _score(question_only).evidence["aeo"]["components"]["answerability"] == 0.0
+
+
+def test_faq_implementation_is_unmeasured_when_no_page_asks_a_question() -> None:
+    """A product catalogue is not worse for having no FAQPage schema. There
+    is no Q&A content there for the markup to be missing from, so scoring it
+    zero would invent a failure."""
+    no_questions = _clean_site(3)
+    for p in no_questions:
+        p.question_heading_count = 0
+
+    evidence = _score(no_questions).evidence["aeo"]
+    assert evidence["components"]["faq_implementation"] is None
+    assert "faq_implementation" not in evidence["weights_used"]
+    assert any("faq_implementation" in reason for reason in evidence["not_measured"])
+
+
+def test_faq_implementation_measures_markup_on_the_pages_that_ask_questions() -> None:
+    marked_up = _clean_site(3)
+    for p in marked_up:
+        p.schema_types = ["Organization", "FAQPage"]
+
+    assert _score(marked_up).evidence["aeo"]["components"]["faq_implementation"] == 100.0
+    assert _score(_clean_site(3)).evidence["aeo"]["components"]["faq_implementation"] == 0.0
+
+
+# --------------------------------------------------------------------------
+# GEO — can a generative system tell who wrote this and reuse it?
+# --------------------------------------------------------------------------
+
+
+def test_brand_consistency_is_a_share_not_a_verdict() -> None:
+    """One stray name variant on a five-page site is a 4-in-5 consistent
+    brand, not a failed one. The old check returned 0 for any disagreement at
+    all, which made a typo look identical to a site genuinely split between
+    two names."""
+    consistent = _clean_site()
+    assert _score(consistent).evidence["geo"]["components"]["brand_consistency"] == 100.0
+
+    one_variant = _clean_site()
+    one_variant[-1].schema_blocks = [
         {"@type": "Organization", "name": "A Totally Different Name", "url": "https://example.com"}
     ]
-
-    consistent_score = compute_spy_score(
-        pages=consistent_pages, findings=run_all_rules(consistent_pages, []), urls_processed=len(consistent_pages)
-    )
-    inconsistent_score = compute_spy_score(
-        pages=inconsistent_pages, findings=run_all_rules(inconsistent_pages, []), urls_processed=len(inconsistent_pages)
-    )
-
-    assert consistent_score.evidence["geo"]["entity_name_consistency_pct"] == 100.0
-    assert inconsistent_score.evidence["geo"]["entity_name_consistency_pct"] == 0.0
-    assert inconsistent_score.geo_score < consistent_score.geo_score
+    mixed = _score(one_variant)
+    assert mixed.evidence["geo"]["components"]["brand_consistency"] == 80.0
+    assert mixed.geo_score < _score(consistent).geo_score
 
 
-def test_geo_score_rewards_citation_readiness() -> None:
-    """§49 citation readiness: pages that link out to external sources are a
-    real, measurable signal once the caller supplies the crawl's page links —
-    absent that evidence, the signal is 0, never guessed."""
+def test_geo_rewards_pages_that_cite_outside_sources() -> None:
     pages = _clean_site()
     findings = run_all_rules(pages, [])
-
-    without_citations = compute_spy_score(pages=pages, findings=findings, urls_processed=len(pages))
-    with_citations = compute_spy_score(
+    without = compute_spy_score(pages=pages, findings=findings, urls_processed=len(pages))
+    with_sources = compute_spy_score(
         pages=pages, findings=findings, urls_processed=len(pages), links=_citation_links(pages)
     )
+    assert without.evidence["geo"]["components"]["source_attribution"] == 0.0
+    assert with_sources.evidence["geo"]["components"]["source_attribution"] == 100.0
+    assert with_sources.geo_score > without.geo_score
 
-    assert without_citations.evidence["geo"]["citation_readiness_pct"] == 0.0
-    assert with_citations.evidence["geo"]["citation_readiness_pct"] == 100.0
-    assert with_citations.geo_score > without_citations.geo_score
 
-
-def test_geo_score_rewards_organization_field_completeness() -> None:
-    """A bare `{"@type": "Organization"}` is a much weaker GEO entity signal
-    than one with logo and sameAs social profiles filled in (§49)."""
-    rich_pages = _clean_site()
-    bare_pages = _clean_site()
-    for p in bare_pages:
+def test_knowledge_graph_signals_reward_a_resolvable_entity() -> None:
+    """A bare Organization block declares an entity; one with an @id, a logo
+    and sameAs profiles gives a knowledge graph something to resolve it
+    against."""
+    rich = _clean_site()
+    bare = _clean_site()
+    for p in bare:
         p.schema_blocks = [{"@type": "Organization", "name": "Example Co", "url": "https://example.com"}]
 
-    rich_score = compute_spy_score(pages=rich_pages, findings=run_all_rules(rich_pages, []), urls_processed=len(rich_pages))
-    bare_score = compute_spy_score(pages=bare_pages, findings=run_all_rules(bare_pages, []), urls_processed=len(bare_pages))
-
-    assert rich_score.evidence["geo"]["org_field_completeness_pct"] == 100.0
-    assert bare_score.evidence["geo"]["org_field_completeness_pct"] == 50.0
+    rich_score, bare_score = _score(rich), _score(bare)
+    assert rich_score.evidence["geo"]["components"]["knowledge_graph_signals"] == 75.0
+    assert bare_score.evidence["geo"]["components"]["knowledge_graph_signals"] == 25.0
     assert rich_score.geo_score > bare_score.geo_score
 
 
-def test_authority_score_absent_without_any_referring_domains() -> None:
-    """§144/M5 — zero referring domains in Spy's own index must never read
-    as a confident low authority score; it means "no evidence yet," not
-    "genuinely has no backlinks" (§3)."""
-    pages = _clean_site()
-    score = compute_spy_score(pages=pages, findings=run_all_rules(pages, []), urls_processed=len(pages))
-    assert score.authority_score is None
-    assert score.evidence["authority"]["referring_domains"] == 0
-    assert "authority" not in score.evidence["weights_used"]
+def test_original_information_gain_is_always_reported_as_unmeasured() -> None:
+    """It is a real GEO dimension and it is not derivable from a crawl —
+    establishing that information appears nowhere else needs a corpus. It
+    carries a weight so the omission is on the record, and is always dropped
+    rather than estimated."""
+    evidence = _score(_clean_site()).evidence["geo"]
+    assert "original_information_gain" in GEO_COMPONENT_WEIGHTS
+    assert evidence["components"]["original_information_gain"] is None
+    assert "original_information_gain" not in evidence["weights_used"]
+    assert any("original_information_gain" in reason for reason in evidence["not_measured"])
 
 
-def test_authority_score_present_with_referring_domains() -> None:
-    pages = _clean_site()
-    for p in pages:
-        p.internal_pagerank = 50.0
-    score = compute_spy_score(
-        pages=pages, findings=run_all_rules(pages, []), urls_processed=len(pages),
-        referring_domains=5, total_backlinks=12,
-    )
-    assert score.authority_score is not None
-    assert score.authority_score > 0
-    assert score.evidence["authority"]["referring_domains"] == 5
-    assert score.evidence["authority"]["total_backlinks"] == 12
-    assert "authority" in score.evidence["weights_used"]
+def test_topical_authority_needs_depth_and_breadth_together() -> None:
+    """Depth without breadth is one good essay; breadth without depth is a
+    sitemap of stubs. Neither is authority."""
+    deep_and_broad = _clean_site(40)
+    for p in deep_and_broad:
+        p.word_count = 1200
+
+    deep_but_narrow = _clean_site(2)
+    for p in deep_but_narrow:
+        p.word_count = 1200
+
+    broad_but_thin = _clean_site(40)
+    for p in broad_but_thin:
+        p.word_count = 120
+
+    def topical(pages):
+        return _score(pages).evidence["geo"]["components"]["topical_authority"]
+
+    assert topical(deep_and_broad) > topical(deep_but_narrow)
+    assert topical(deep_and_broad) > topical(broad_but_thin)
+    assert topical(broad_but_thin) == 0.0
 
 
-def test_authority_score_increases_with_more_referring_domains() -> None:
-    pages = _clean_site()
-    for p in pages:
-        p.internal_pagerank = 50.0
-    few = compute_spy_score(
-        pages=pages, findings=run_all_rules(pages, []), urls_processed=len(pages), referring_domains=1, total_backlinks=1,
-    )
-    many = compute_spy_score(
-        pages=pages, findings=run_all_rules(pages, []), urls_processed=len(pages), referring_domains=40, total_backlinks=100,
-    )
-    assert many.authority_score > few.authority_score
-
-
-def test_authority_score_rewards_higher_internal_pagerank() -> None:
-    low_pr_pages = _clean_site()
-    high_pr_pages = _clean_site()
-    for p in low_pr_pages:
-        p.internal_pagerank = 5.0
-    for p in high_pr_pages:
-        p.internal_pagerank = 90.0
-
-    low = compute_spy_score(
-        pages=low_pr_pages, findings=run_all_rules(low_pr_pages, []), urls_processed=len(low_pr_pages),
-        referring_domains=5, total_backlinks=5,
-    )
-    high = compute_spy_score(
-        pages=high_pr_pages, findings=run_all_rules(high_pr_pages, []), urls_processed=len(high_pr_pages),
-        referring_domains=5, total_backlinks=5,
-    )
-    assert high.authority_score > low.authority_score
-
-
-def test_clean_heading_pct_counts_skipped_ranks_as_unclean() -> None:
+def test_skipped_heading_ranks_lower_ai_readable_structure() -> None:
     """Regression: this counted only `h1_count == 1`, so a site whose pages
-    jump H1 -> H3 reported 100% clean headings and the AEO score credited
-    hygiene it didn't have. A broken outline is exactly what stops an answer
-    engine finding the part of the page that answers the question.
+    jump H1 -> H3 reported clean headings and the score credited hygiene it
+    didn't have. A broken outline is exactly what stops a machine finding the
+    part of the page that answers the question.
     """
     ordered = _clean_site(4)
     skipped = [
@@ -305,14 +402,70 @@ def test_clean_heading_pct_counts_skipped_ranks_as_unclean() -> None:
         )
         for p in ordered
     ]
-
-    ordered_score = compute_spy_score(
-        pages=ordered, findings=run_all_rules(ordered, []), urls_processed=len(ordered)
+    ordered_score, skipped_score = _score(ordered), _score(skipped)
+    assert (
+        skipped_score.evidence["geo"]["components"]["ai_readable_structure"]
+        < ordered_score.evidence["geo"]["components"]["ai_readable_structure"]
     )
-    skipped_score = compute_spy_score(
-        pages=skipped, findings=run_all_rules(skipped, []), urls_processed=len(skipped)
+    assert skipped_score.geo_score < ordered_score.geo_score
+
+
+def test_shared_signals_are_measured_once() -> None:
+    """GEO's fact density and ACRS's are the same measurement. Computing them
+    separately is how two sections of one report end up printing different
+    numbers under the same name."""
+    pages = _clean_site()
+    for i, p in enumerate(pages):
+        p.statistic_count = 3 if i < 3 else 0
+    score = _score(pages)
+    assert score.evidence["geo"]["components"]["fact_density"] == score.evidence["acrs"]["fact_density"]
+    assert (
+        score.evidence["aeo"]["components"]["passage_extraction"]
+        == score.evidence["acrs"]["passage_extractability"]
     )
 
-    assert ordered_score.evidence["aeo"]["clean_heading_pct"] == 100.0
-    assert skipped_score.evidence["aeo"]["clean_heading_pct"] == 0.0
-    assert skipped_score.aeo_score < ordered_score.aeo_score
+
+# --------------------------------------------------------------------------
+# Authority — SEO's smallest component, and the one most often unmeasurable
+# --------------------------------------------------------------------------
+
+
+def test_authority_score_absent_without_any_referring_domains() -> None:
+    """Zero referring domains in Spy's own index must never read as a
+    confident low score; it means "no evidence yet", not "genuinely has no
+    backlinks" (§3)."""
+    score = _score(_clean_site())
+    assert score.authority_score is None
+    assert score.evidence["authority"]["referring_domains"] == 0
+    assert "authority" not in score.evidence["seo"]["weights_used"]
+
+
+def test_authority_score_present_with_referring_domains() -> None:
+    pages = _clean_site()
+    for p in pages:
+        p.internal_pagerank = 50.0
+    score = _score(pages, referring_domains=5, total_backlinks=12)
+    assert score.authority_score is not None and score.authority_score > 0
+    assert score.evidence["authority"]["referring_domains"] == 5
+    assert score.evidence["authority"]["total_backlinks"] == 12
+    assert "authority" in score.evidence["seo"]["weights_used"]
+
+
+def test_authority_score_increases_with_more_referring_domains() -> None:
+    pages = _clean_site()
+    for p in pages:
+        p.internal_pagerank = 50.0
+    few = _score(pages, referring_domains=1, total_backlinks=1)
+    many = _score(pages, referring_domains=40, total_backlinks=100)
+    assert many.authority_score > few.authority_score
+
+
+def test_authority_score_rewards_higher_internal_pagerank() -> None:
+    low_pages, high_pages = _clean_site(), _clean_site()
+    for p in low_pages:
+        p.internal_pagerank = 5.0
+    for p in high_pages:
+        p.internal_pagerank = 90.0
+    low = _score(low_pages, referring_domains=5, total_backlinks=5)
+    high = _score(high_pages, referring_domains=5, total_backlinks=5)
+    assert high.authority_score > low.authority_score

@@ -84,14 +84,20 @@ export interface Audit {
   project_id: string;
   status: string;
   max_urls: number;
+  /** The Overall Digital Search Score — SEO, AEO and GEO combined. */
   spy_score: number | null;
-  technical_score: number | null;
   seo_score: number | null;
-  content_score: number | null;
-  performance_score: number | null;
-  authority_score: number | null;
   aeo_score: number | null;
   geo_score: number | null;
+  acrs_score: number | null;
+  /** The seven components of seo_score, each out of 100. */
+  technical_score: number | null;
+  onpage_score: number | null;
+  content_score: number | null;
+  internal_links_score: number | null;
+  structured_data_score: number | null;
+  performance_score: number | null;
+  authority_score: number | null;
   confidence: number | null;
   score_version: string;
   evidence: AuditEvidence;
@@ -103,31 +109,39 @@ export interface Audit {
   created_at: string;
 }
 
-export interface AuditEvidence {
+/**
+ * A sub-score section. `components` maps each signal to its value, where
+ * `null` means *not measured* — never zero. `weights_used` holds only the
+ * components that were actually in the average, rescaled to sum to 1.
+ */
+export interface ScoreSection {
+  components?: Record<string, number | null>;
   weights_used?: Record<string, number>;
-  architecture_score?: number;
+  not_measured?: string[];
+  /** Present instead of components when there was nothing to score. */
+  reason?: string;
+  pages_scored?: number;
+}
+
+export interface AuditEvidence {
+  search_weights_used?: Record<string, number>;
+  seo?: ScoreSection;
+  aeo?: ScoreSection & { pages_posing_questions?: number };
+  geo?: ScoreSection & {
+    has_organization_schema?: boolean;
+    org_field_completeness_pct?: number | null;
+    topical_authority_caveat?: string;
+  };
+  acrs?: Record<string, unknown> & {
+    citation_probability?: string;
+    not_measured?: string[];
+    reason?: string;
+  };
   authority?: {
     referring_domains?: number;
     total_backlinks?: number;
     reason?: string;
-  };
-  aeo?: {
-    schema_coverage_pct?: number;
-    clean_heading_pct?: number;
-    question_coverage_pct?: number;
-    structured_content_pct?: number;
-    byline_coverage_pct?: number;
-    has_faq_schema?: boolean;
-    reason?: string;
-  };
-  geo?: {
-    has_organization_schema?: boolean;
-    schema_coverage_pct?: number;
-    org_field_completeness_pct?: number | null;
-    entity_name_consistency_pct?: number | null;
-    has_person_or_product_schema?: boolean;
-    citation_readiness_pct?: number;
-    reason?: string;
+    coverage_caveat?: string;
   };
   total_pages_scored?: number;
   urls_processed?: number;
@@ -283,12 +297,13 @@ export interface Competitor {
   last_crawled_at: string | null;
   failure_message: string | null;
   spy_score: number | null;
-  technical_score: number | null;
   seo_score: number | null;
-  content_score: number | null;
-  performance_score: number | null;
   aeo_score: number | null;
   geo_score: number | null;
+  technical_score: number | null;
+  onpage_score: number | null;
+  content_score: number | null;
+  performance_score: number | null;
   created_at: string;
 }
 

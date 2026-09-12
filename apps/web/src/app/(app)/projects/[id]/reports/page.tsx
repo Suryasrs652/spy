@@ -36,7 +36,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ id: st
             <div key={a.id} className="card p-4 flex items-center justify-between gap-4">
               <div>
                 <div className="text-sm font-medium">
-                  Spy Score {a.spy_score !== null ? a.spy_score.toFixed(0) : "—"}
+                  Overall {a.spy_score !== null ? a.spy_score.toFixed(0) : "—"}
                 </div>
                 <div className="text-xs text-muted mt-1">
                   Completed {a.completed_at ? new Date(a.completed_at).toLocaleString() : "—"} · v{a.score_version}

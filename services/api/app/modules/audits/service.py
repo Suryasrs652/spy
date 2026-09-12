@@ -161,8 +161,9 @@ async def list_recommendations(
 
 
 _COMPARABLE_SCORE_FIELDS = (
-    "spy_score", "technical_score", "seo_score", "content_score",
-    "performance_score", "authority_score", "aeo_score", "geo_score", "confidence",
+    "spy_score", "seo_score", "aeo_score", "geo_score", "acrs_score",
+    "technical_score", "onpage_score", "content_score", "internal_links_score",
+    "structured_data_score", "performance_score", "authority_score", "confidence",
 )
 
 
@@ -193,6 +194,19 @@ async def compare_audits(
     for a in (audit_a, audit_b):
         if a.status != AuditStatus.COMPLETED.value:
             raise ConflictError("Both audits must be COMPLETED to compare.")
+
+    # §22 keeps a completed audit's score frozen under the version that
+    # produced it, which means two versions can put different meanings in the
+    # same column — spy-score-v1.0's `seo_score` was the on-page score, v2.0's
+    # is a seven-component composite. Subtracting one from the other produces
+    # a number that looks like a trend and is not one, so the comparison is
+    # refused rather than rendered.
+    if audit_a.score_version != audit_b.score_version:
+        raise ConflictError(
+            f"These audits were scored under different methodologies "
+            f"({audit_a.score_version} and {audit_b.score_version}), so their scores "
+            f"are not comparable. Re-run the older audit to compare like with like."
+        )
 
     baseline, current = sorted([audit_a, audit_b], key=lambda a: a.created_at)
 

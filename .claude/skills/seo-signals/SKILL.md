@@ -9,9 +9,28 @@ description: >
 
 # Reading Spy's SEO output
 
-`seo_score` is one of seven sub-scores. It covers on-page signals: metadata,
-indexability, headings, content, images, links, structured data, security
-headers, crawlability and internationalisation.
+`seo_score` is one of the three headline scores (with AEO and GEO), and it is
+itself seven components out of 100:
+
+| Component | Weight | Built from |
+| --- | --- | --- |
+| `technical` | 25 | `SEO_CRAWL_*`, `SEO_INDEX_*`, `SEO_SEC_*`, `SEO_INTL_*` |
+| `onpage` | 20 | `SEO_META_*`, `SEO_IMG_*` |
+| `content` | 20 | `SEO_CONTENT_*` |
+| `internal_links` | 10 | `SEO_LINK_*` |
+| `structured_data` | 10 | `SEO_SCHEMA_*` |
+| `performance` | 10 | Measured response times |
+| `authority` | 5 | Referring domains + internal PageRank |
+
+Each is 100 minus a deduction per finding, scaled by severity and by how much
+of the site the finding affects. Read `evidence.seo.components` for the
+numbers and `evidence.seo.weights_used` for the weights actually applied —
+`authority` drops out whenever Spy's backlink index has nothing for the site,
+and the other six are rescaled to sum to 1.
+
+Before spy-score-v2.0 this column held the on-page score alone. Audits stamped
+`spy-score-v1.0` still do, which is why comparing across versions is refused
+rather than silently performed.
 
 ## Rule id map
 

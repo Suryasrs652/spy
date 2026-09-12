@@ -51,7 +51,7 @@ export default async function ProjectDetailPage({ params }: { params: Promise<{ 
           <thead>
             <tr className="text-left text-muted border-b border-border">
               <th className="py-2 font-normal">Status</th>
-              <th className="py-2 font-normal">Spy Score</th>
+              <th className="py-2 font-normal">Overall</th>
               <th className="py-2 font-normal">Started</th>
               <th className="py-2 font-normal"></th>
             </tr>

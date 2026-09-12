@@ -7,9 +7,11 @@ import { apiGet, ApiError } from "@/lib/api";
 import type { AuditComparison, IssueSummary } from "@/lib/api";
 
 const SCORE_LABELS: Record<string, string> = {
-  spy_score: "Spy Score", technical_score: "Technical", seo_score: "SEO",
-  content_score: "Content", performance_score: "Performance", authority_score: "Authority",
-  aeo_score: "AEO", geo_score: "GEO", confidence: "Confidence",
+  spy_score: "Overall", seo_score: "SEO", aeo_score: "AEO", geo_score: "GEO",
+  acrs_score: "ACRS", technical_score: "Technical", onpage_score: "On-page",
+  content_score: "Content", internal_links_score: "Internal links",
+  structured_data_score: "Structured data", performance_score: "Performance",
+  authority_score: "Authority", confidence: "Confidence",
 };
 
 const SEV_COLOR: Record<string, string> = {

@@ -150,16 +150,20 @@ async def _run_audit_async(audit_id: str) -> None:
                 referring_domains=backlink_summary["referring_domains"], total_backlinks=backlink_summary["total_backlinks"],
             )
             audit.spy_score = score.spy_score
-            audit.technical_score = score.technical_score
             audit.seo_score = score.seo_score
-            audit.content_score = score.content_score
-            audit.performance_score = score.performance_score
-            audit.authority_score = score.authority_score
             audit.aeo_score = score.aeo_score
             audit.geo_score = score.geo_score
             audit.acrs_score = score.acrs_score
+            audit.technical_score = score.technical_score
+            audit.onpage_score = score.onpage_score
+            audit.content_score = score.content_score
+            audit.internal_links_score = score.internal_links_score
+            audit.structured_data_score = score.structured_data_score
+            audit.performance_score = score.performance_score
+            audit.authority_score = score.authority_score
             audit.confidence = score.confidence
             audit.evidence = score.evidence
+            audit.score_version = score.score_version
             await db.commit()
 
             recs = build_recommendations(findings, total_pages=len(result.pages))

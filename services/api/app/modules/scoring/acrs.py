@@ -88,11 +88,21 @@ def _pages_citing_a_source(indexable: list[CrawlPage], links: list[PageLink] | N
     }
 
 
-def compute_acrs(pages: list[CrawlPage], links: list[PageLink] | None = None) -> tuple[float, dict]:
-    """Returns (score, evidence) over the indexable pages of one audit."""
+def measure_citation_signals(
+    pages: list[CrawlPage], links: list[PageLink] | None = None
+) -> dict[str, float] | None:
+    """The seven measured components, as percentages, unrounded.
+
+    Split out from `compute_acrs` because the GEO score is built from several
+    of these same signals (app/modules/scoring/spy_score.py). Measuring them
+    in one place means GEO's "fact density" and ACRS's cannot drift into two
+    different numbers under the same name.
+
+    Returns None when there is no indexable page to measure.
+    """
     indexable = [p for p in pages if p.indexable]
     if not indexable:
-        return 0.0, {"reason": "no indexable pages", "version": ACRS_VERSION}
+        return None
 
     total = len(indexable)
 
@@ -139,7 +149,7 @@ def compute_acrs(pages: list[CrawlPage], links: list[PageLink] | None = None) ->
         sum(1 for p in indexable if _ENTITY_TYPES.intersection(p.schema_types or [])), total
     )
 
-    components = {
+    return {
         "fact_density": fact_density,
         "passage_extractability": passage_extractability,
         "source_attribution": source_attribution,
@@ -147,15 +157,28 @@ def compute_acrs(pages: list[CrawlPage], links: list[PageLink] | None = None) ->
         "answer_independence": answer_independence,
         "entity_clarity": entity_clarity,
         "temporal_signals": temporal_signals,
+        "pages_scored": float(total),
     }
-    score = sum(components[name] * weight for name, weight in COMPONENT_WEIGHTS.items())
 
-    evidence = {name: round(value, 1) for name, value in components.items()}
+
+def score_from_components(components: dict[str, float]) -> float:
+    return sum(components[name] * weight for name, weight in COMPONENT_WEIGHTS.items())
+
+
+def evidence_from_components(components: dict[str, float] | None, score: float) -> dict:
+    """The reported ACRS evidence block. Shared with the scoring engine, which
+    measures the components once and feeds them to ACRS, AEO and GEO alike."""
+    if components is None:
+        return {"reason": "no indexable pages", "version": ACRS_VERSION}
+
+    evidence = {
+        name: round(value, 1) for name, value in components.items() if name != "pages_scored"
+    }
     evidence.update(
         {
             "version": ACRS_VERSION,
             "weights_used": COMPONENT_WEIGHTS,
-            "pages_scored": total,
+            "pages_scored": int(components["pages_scored"]),
             "citation_probability": citation_probability(score),
             # Named so a reader knows these were considered and excluded,
             # rather than overlooked.
@@ -165,7 +188,16 @@ def compute_acrs(pages: list[CrawlPage], links: list[PageLink] | None = None) ->
             ],
         }
     )
-    return round(score, 2), evidence
+    return evidence
+
+
+def compute_acrs(pages: list[CrawlPage], links: list[PageLink] | None = None) -> tuple[float, dict]:
+    """Returns (score, evidence) over the indexable pages of one audit."""
+    components = measure_citation_signals(pages, links)
+    if components is None:
+        return 0.0, evidence_from_components(None, 0.0)
+    score = score_from_components(components)
+    return round(score, 2), evidence_from_components(components, score)
 
 
 def citation_probability(score: float) -> str:

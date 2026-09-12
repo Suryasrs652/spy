@@ -2,11 +2,7 @@ import Link from "next/link";
 import { serverApiGet } from "@/lib/serverApi";
 import { getLatestCompletedAudit } from "@/lib/latestAudit";
 import type { Project } from "@/lib/api";
-
-function Pct({ value }: { value: number | undefined }) {
-  if (value === undefined || value === null) return <span className="text-muted">—</span>;
-  return <span>{value.toFixed(0)}%</span>;
-}
+import { SubScores } from "@/components/SubScores";
 
 export default async function AeoPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -50,36 +46,20 @@ export default async function AeoPage({ params }: { params: Promise<{ id: string
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 mb-8">
-            <div className="card p-5">
-              <div className="text-2xl font-bold"><Pct value={aeo.schema_coverage_pct} /></div>
-              <div className="text-xs text-muted uppercase tracking-wide mt-1">Schema Coverage</div>
-            </div>
-            <div className="card p-5">
-              <div className="text-2xl font-bold"><Pct value={aeo.clean_heading_pct} /></div>
-              <div className="text-xs text-muted uppercase tracking-wide mt-1">Clean Heading Structure</div>
-            </div>
-            <div className="card p-5">
-              <div className="text-2xl font-bold"><Pct value={aeo.question_coverage_pct} /></div>
-              <div className="text-xs text-muted uppercase tracking-wide mt-1">Question Coverage</div>
-            </div>
-            <div className="card p-5">
-              <div className="text-2xl font-bold"><Pct value={aeo.structured_content_pct} /></div>
-              <div className="text-xs text-muted uppercase tracking-wide mt-1">Structured Content</div>
-            </div>
-            <div className="card p-5">
-              <div className="text-2xl font-bold"><Pct value={aeo.byline_coverage_pct} /></div>
-              <div className="text-xs text-muted uppercase tracking-wide mt-1">Byline Coverage</div>
-            </div>
-            <div className="card p-5">
-              <div className="text-2xl font-bold">{aeo.has_faq_schema ? "Yes" : "No"}</div>
-              <div className="text-xs text-muted uppercase tracking-wide mt-1">FAQ Schema Present</div>
-            </div>
-          </div>
+          <SubScores title="The seven signals" section={aeo} />
+
+          <div className="h-8" />
 
           <div className="card p-6 text-sm text-muted">
-            AEO evaluates structural signals AI answer engines use to extract and cite content: FAQ/Q&amp;A schema,
-            clean heading hierarchies, question-style headings, structured lists/tables, and clear authorship. Spy
+            AEO asks whether an answer engine could lift an answer out of this site. <strong>Answerability</strong>
+            is the one to read first: it counts only pages that both pose something — a question heading, a
+            definition list, a table — <em>and</em> carry at least one paragraph that survives being quoted away
+            from its neighbours. Either half alone is not an answer, which is why adding headings without
+            rewriting the prose beneath them rarely moves this score.
+            <br /><br />
+            <strong>FAQ implementation</strong> reads &ldquo;Not measured&rdquo; when no page poses a question in a heading —
+            there is no Q&amp;A content for the markup to be missing from, and a catalogue is not worse for
+            lacking it. Spy measures readiness to be cited; it cannot observe whether any engine cited you, and
             does not guarantee inclusion in any AI-generated answer.
           </div>
         </>

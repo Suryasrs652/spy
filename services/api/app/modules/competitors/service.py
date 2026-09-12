@@ -86,8 +86,11 @@ async def remove_competitor(
     await db.commit()
 
 
+# The matrix the report shows, headline scores first so a reader sees where
+# the gap is before seeing what it is made of.
 _COMPARISON_FIELDS = (
-    "spy_score", "technical_score", "seo_score", "content_score", "performance_score", "aeo_score", "geo_score",
+    "spy_score", "seo_score", "aeo_score", "geo_score",
+    "technical_score", "onpage_score", "content_score", "performance_score",
 )
 
 
@@ -226,12 +229,13 @@ async def run_competitor_benchmark(db: AsyncSession, *, competitor_id: uuid.UUID
         competitor.last_crawled_at = utcnow()
         competitor.failure_message = None
         competitor.spy_score = score.spy_score
-        competitor.technical_score = score.technical_score
         competitor.seo_score = score.seo_score
-        competitor.content_score = score.content_score
-        competitor.performance_score = score.performance_score
         competitor.aeo_score = score.aeo_score
         competitor.geo_score = score.geo_score
+        competitor.technical_score = score.technical_score
+        competitor.onpage_score = score.onpage_score
+        competitor.content_score = score.content_score
+        competitor.performance_score = score.performance_score
         competitor.evidence = {**score.evidence, "top_terms": top_terms}
         await db.commit()
         logger.info("competitor_benchmark_completed", competitor_id=str(competitor_id), spy_score=score.spy_score)

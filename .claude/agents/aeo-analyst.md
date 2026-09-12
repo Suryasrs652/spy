@@ -17,28 +17,42 @@ Read the `aeo-signals` skill for what each evidence field means. Read
 
 ## Your job
 
-Read `evidence.aeo` on the audit object rather than inferring from `aeo_score`,
-and use `/audits/<id>/pages` to name the specific pages behind each percentage —
-`question_heading_count`, `has_author_byline`, `schema_types`,
-`heading_order_valid`, `list_count`, `table_count`.
+Read `evidence.aeo.components` on the audit object rather than inferring from
+`aeo_score`, and use `/audits/<id>/pages` to name the specific pages behind each
+percentage — `question_heading_count`, `paragraph_count`,
+`self_contained_paragraph_count`, `has_author_byline`, `schema_types`,
+`list_count`, `table_count`.
 
-**Verify a zero before you report it.** If `schema_coverage_pct` is 0 or
-`has_faq_schema` is false, fetch a page and grep for `application/ld+json` and
+**Verify a zero before you report it.** If `schema_support` is 0 or
+`faq_implementation` is 0, fetch a page and grep for `application/ld+json` and
 `FAQPage`. Schema detection here has been wrong before, and a false zero drags
 the whole score down and sends the owner to fix something that already works.
 
+**`null` is not zero.** `faq_implementation` is null when no page poses a
+question in a heading — there is nothing for FAQ markup to be missing from.
+Report that as not measured. `evidence.aeo.not_measured` says which and why.
+
 ## What to hand back
 
-Each signal with its number, what it means for this site specifically, and what
-would move it. Lead with the largest lever — on most sites that is authorship,
-which is a content decision rather than an engineering one, and worth saying so.
+Each of the seven sub-scores with its number, what it means for this site
+specifically, and what would move it. Lead with the largest lever.
+
+`answerability` is usually the one worth leading on, and the one most often
+mis-diagnosed: it requires both a question *and* a paragraph that survives
+being lifted out of context. When it is low while `question_coverage` is high,
+the headings were added and the prose underneath was not changed — say that,
+rather than recommending more headings.
 
 Where a signal is already strong, say it plainly; a site with FAQ schema on
-half its pages has a habit worth extending rather than a gap to fill.
+half its question pages has a habit worth extending rather than a gap to fill.
 
 ## Honesty constraint
 
 AEO measures readiness to be cited, never citation itself. Spy cannot see
 whether any engine quoted this site. Write "stronger citation candidate", never
-"will appear in AI answers". If `evidence.aeo` carries a `reason` instead of
-numbers, report that nothing was scoreable and why.
+"will appear in AI answers".
+
+If `evidence.aeo` carries a `reason` instead of components, distinguish the two
+cases: `"no pages were crawled"` means unmeasurable and the score is null;
+`"no indexable pages…"` means measured and the score is 0, because nothing on
+the site can be read at all. The second is a finding, not a gap.

@@ -51,11 +51,12 @@ class Competitor(UUIDPKMixin, TimestampMixin, Base):
     failure_message: Mapped[str | None] = mapped_column(Text)
 
     spy_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
-    technical_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     seo_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
-    content_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
-    performance_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     aeo_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     geo_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    technical_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    onpage_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    content_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    performance_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
 
     evidence: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)

@@ -18,15 +18,21 @@ class AuditOut(BaseModel):
     project_id: uuid.UUID
     status: str
     max_urls: int
+    # spy_score is the Overall Digital Search Score; seo/aeo/geo are the
+    # three scores it combines. Everything below acrs_score is a component
+    # of seo_score, not a peer of it.
     spy_score: float | None = None
-    technical_score: float | None = None
     seo_score: float | None = None
-    content_score: float | None = None
-    performance_score: float | None = None
-    authority_score: float | None = None
     aeo_score: float | None = None
     geo_score: float | None = None
     acrs_score: float | None = None
+    technical_score: float | None = None
+    onpage_score: float | None = None
+    content_score: float | None = None
+    internal_links_score: float | None = None
+    structured_data_score: float | None = None
+    performance_score: float | None = None
+    authority_score: float | None = None
     confidence: float | None = None
     score_version: str
     evidence: dict = {}

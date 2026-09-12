@@ -21,12 +21,13 @@ class CompetitorOut(BaseModel):
     last_crawled_at: datetime | None
     failure_message: str | None
     spy_score: float | None
-    technical_score: float | None
     seo_score: float | None
-    content_score: float | None
-    performance_score: float | None
     aeo_score: float | None
     geo_score: float | None
+    technical_score: float | None
+    onpage_score: float | None = None
+    content_score: float | None
+    performance_score: float | None
     created_at: datetime
 
 

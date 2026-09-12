@@ -36,29 +36,48 @@ crawlability, performance and security headers. Every finding carries a
 severity, the pages it affects, why it matters and how to fix it. No model is
 asked to guess; identical input produces identical output.
 
-**Produces a Spy Score** from the stored evidence — a versioned
-(`spy-score-v1.0`), reproducible number with per-component sub-scores, the
-weights actually used, and a confidence value derived from crawl coverage. The
-evidence is kept so any score can be re-derived and argued with.
+**Produces three scores, not one.** They answer different questions, so
+folding them into a single number hides which one you have a problem with:
+
+| | Asks |
+| --- | --- |
+| **SEO** | Can a search engine crawl, index and rank this? |
+| **AEO** | Can an answer engine lift an answer out of it? |
+| **GEO** | Can a generative system tell who wrote it and reuse it? |
+
+The **Overall Digital Search Score** combines them at 60/20/20. SEO is itself
+seven components out of 100 — technical 25, on-page 20, content 20, internal
+links 10, structured data 10, performance 10, authority 5. AEO has seven
+sub-scores and GEO has ten, and each one is reported with the weight it
+actually carried.
+
+Every score is versioned (`spy-score-v2.0`) and reproducible: identical crawl
+evidence always yields an identical number, the evidence is stored alongside
+it, and a completed audit's score is never recomputed. Two audits scored under
+different versions are refused rather than silently diffed — the same column
+can mean different things across versions.
 
 **Scores AI citation readiness (ACRS)** — whether a generative system could
 quote a page as an answer and attribute it: checkable figures, a visible date,
 named sources, a byline, and prose that survives being lifted out of context.
-It deliberately does not score whether a claim is *true* or whether the
-information exists elsewhere — both need a corpus and a judgement, and are
-reported as unmeasured rather than estimated.
+Its signals are measured once and shared with AEO and GEO, so the same thing
+cannot be reported as two different numbers in two sections of one report.
 
-**Scores AEO and GEO**, not just SEO:
-
-- *AEO* — how extractable the content is for answer engines: schema coverage,
-  heading hygiene, question coverage, structured content, authorship.
-- *GEO* — how clearly the site defines its entity for generative engines:
-  organization markup and its field completeness, name consistency across
-  pages, citation readiness.
+**Says what it did not measure.** A component with no evidence has its weight
+redistributed and is reported as *not measured*, never as zero — because "we
+didn't look" and "you failed" are different claims. Authority reads as
+unmeasured until Spy's own crawl index finds a referring domain; GEO's
+*original information gain* is always unmeasured, because establishing that
+information appears nowhere else needs a corpus to compare against. It carries
+a weight anyway, so the omission is on the record rather than looking like an
+oversight. The one thing that is *not* treated as unmeasurable: a site where
+nothing is indexable scores zero, because that is a measurement.
 
 **Ranks the fixes.** Findings become recommendations scored by
-`impact × confidence ÷ effort` and grouped into Do Now / This Week / This Month
-/ Monitor, so the list is ordered by leverage rather than by severity.
+`impact × confidence × reach ÷ effort` and grouped into Do Now / This Week /
+This Month / Monitor, so the list is ordered by leverage rather than by
+severity. Confidence is declared per rule: a check that reads a tag off the
+page is certain, a threshold heuristic is not, and the ranking says so.
 
 **Renders a PDF report** through headless Chromium into S3-compatible storage,
 served back as a short-lived signed URL.

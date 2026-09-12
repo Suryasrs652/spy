@@ -19,9 +19,10 @@ with itself.
 
 **1. An aggregate contradicts its own per-page data.**
 The most consequential kind, because it usually means the metric is measuring
-something other than its name. A real example from this scanner: AEO reported
-`clean_heading_pct` of 100% while 12 of 70 pages had `heading_order_valid:
-false`. The aggregate was counting H1s, not heading order.
+something other than its name. A real example from this scanner: the heading
+hygiene input (now part of GEO's `ai_readable_structure`) reported 100% while
+12 of 70 pages had `heading_order_valid: false`. The aggregate was counting
+H1s, not heading order.
 
 *Resolution:* the per-page evidence wins — it is closer to the source. Report
 the per-page figure, flag the aggregate as suspect, and name the field.

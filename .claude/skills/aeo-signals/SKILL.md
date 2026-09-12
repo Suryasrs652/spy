@@ -1,47 +1,66 @@
 ---
 name: aeo-signals
 description: >
-  Interpret Spy's AEO (Answer Engine Optimization) score and evidence — schema coverage, heading
-  hygiene, question coverage, structured content and authorship. Use when analysing aeo_score,
-  explaining why a site is or isn't extractable by AI answer engines, or deciding what to change to
-  become a better citation candidate.
+  Interpret Spy's AEO (Answer Engine Optimization) score and its seven sub-scores — answerability,
+  question coverage, passage extraction, structured answers, schema support, FAQ implementation and
+  entity clarity. Use when analysing aeo_score, explaining why a site is or isn't extractable by AI
+  answer engines, or deciding what to change to become a better citation candidate.
 ---
 
 # Reading Spy's AEO output
 
-AEO measures whether a page's content can be **extracted and cited** by an
-answer engine — ChatGPT, Perplexity, Google's AI surfaces. It is about
-structure and attribution, not persuasion.
+AEO asks one question: **could an answer engine lift an answer out of this
+site?** It is about structure and attribution, not persuasion, and it is
+scored separately from SEO because a technically immaculate site can still
+give a machine nothing to work with.
 
 The score is a pure function of stored crawl evidence. Read
-`evidence.aeo` on the audit object rather than inferring from the number.
+`evidence.aeo.components` on the audit object rather than inferring from the
+number, and `evidence.aeo.weights_used` to see which components were actually
+in the average.
 
-## The six signals
+## The seven sub-scores
 
-| Field | Means | Fix when low |
-| --- | --- | --- |
-| `schema_coverage_pct` | Share of indexable pages carrying any JSON-LD | Add schema; `Article`, `Service`, `FAQPage` as the content warrants |
-| `clean_heading_pct` | Pages with exactly one H1 **and** no skipped ranks below it | Repair the outline — H1 → H2 → H3, never H1 → H3 |
-| `question_coverage_pct` | Pages with at least one question-shaped heading | Add real questions users ask, as headings, answered directly beneath |
-| `structured_content_pct` | Pages using lists, tables or definition lists | Break dense prose into extractable structures |
-| `byline_coverage_pct` | Pages with a detectable author byline | Add named authors and bios |
-| `has_faq_schema` | Whether `FAQPage` appears anywhere | Mark up existing Q&A blocks |
+| Component | Weight | Means | Fix when low |
+| --- | --- | --- | --- |
+| `answerability` | 0.20 | Pages that both pose something (question heading, definition list, table) **and** carry at least one self-contained paragraph | Answer the question directly under the heading, in prose that stands alone |
+| `question_coverage` | 0.15 | Pages with at least one question-shaped heading | Add real questions users ask, as headings |
+| `passage_extraction` | 0.15 | Share of prose that survives being lifted out of context | Open paragraphs with the subject, not "This means that…" |
+| `structured_answers` | 0.15 | Pages using lists, tables or definition lists | Break dense prose into extractable structures |
+| `schema_support` | 0.15 | Share of indexable pages carrying any JSON-LD | Add schema; `Article`, `Service`, `FAQPage` as the content warrants |
+| `faq_implementation` | 0.10 | **Of the pages that pose questions**, how many mark them up (`FAQPage`/`QAPage`/`HowTo`) | Mark up the Q&A blocks that already exist |
+| `entity_clarity` | 0.10 | Pages whose schema names a recognisable entity type | Declare what the page is *about*, not just that it is a page |
 
-A `reason` field instead of numbers means there was nothing scoreable — no
-indexable pages. Pass that through as "not measured".
+`answerability` is deliberately a conjunction. A question with only
+context-dependent prose under it cannot be quoted, and a liftable paragraph
+nobody asked a question about will not be matched to a query. Either half
+alone is not an answer, which is why the two most common "we added an FAQ and
+nothing happened" cases both show up here.
+
+## Reading "not measured"
+
+`faq_implementation` is `null` when no page on the site poses a question in a
+heading — there is no Q&A content for FAQ markup to be missing from, and a
+product catalogue is not worse for lacking `FAQPage`. When it is null it is
+dropped from the average and its weight redistributed; `evidence.aeo.not_measured`
+says so. Report it as not measured, never as zero.
+
+An `evidence.aeo.reason` field instead of components means one of two things,
+and they are different:
+
+- `"no pages were crawled"` — unmeasurable, score is `null`.
+- `"no indexable pages…"` — measured, score is `0`. Nothing on the site can be
+  read or cited, and that is a finding, not a gap.
 
 ## What matters most
 
-**Authorship is usually the biggest lever and the most neglected.** A site can
-score well on every structural signal and still sit at 0% bylines. Answer
-engines weight named, credentialed authorship when choosing whose claim to
-repeat; an unattributed article is a weaker citation candidate than an
-identical one with a real person behind it. It is also a content decision, not
-an engineering one, which is why it lingers.
+**Answerability is the lever, and it is usually mis-diagnosed.** Sites that
+score badly here have almost always added headings without changing the prose
+underneath. Check `passage_extraction` alongside it — when answerability is
+low and question coverage is high, the paragraphs are the problem.
 
-**Question coverage is the cheapest real win** on sites that already use FAQ
-schema somewhere — the habit exists, it just hasn't been extended. Questions
-are the literal unit an answer engine matches against.
+**`faq_implementation` at 0% with high `question_coverage`** is the cheapest
+real win in the whole score: the content exists, the markup does not.
 
 **Schema coverage below 100% on a site that has schema at all** usually means
 one template is missing it rather than a site-wide gap. Check `schema_types`
@@ -53,7 +72,8 @@ per page in the `/pages` response to find which.
 than quoting percentages:
 
 `question_heading_count`, `list_count`, `table_count`, `has_definition_list`,
-`has_author_byline`, `heading_order_valid`, `has_schema`, `schema_types`.
+`paragraph_count`, `self_contained_paragraph_count`, `has_author_byline`,
+`heading_order_valid`, `has_schema`, `schema_types`.
 
 ## Honesty constraints
 
@@ -65,3 +85,6 @@ score should be phrased as a promise of placement or visibility in AI answers.
 If schema coverage reads 0%, verify it before reporting — fetch a page and grep
 for `application/ld+json`. Schema detection in this scanner has been wrong
 before, and a false zero here drags the whole score down.
+
+Heading hygiene moved: it is part of GEO's `ai_readable_structure` now, not an
+AEO component. See [geo-signals](../geo-signals/SKILL.md).

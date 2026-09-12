@@ -7,8 +7,9 @@ import { apiDelete, apiGet, apiPost, ApiError } from "@/lib/api";
 import type { Competitor, CompetitorComparison, ContentGap } from "@/lib/api";
 
 const SCORE_LABELS: Record<string, string> = {
-  spy_score: "Spy Score", technical_score: "Technical", seo_score: "SEO",
-  content_score: "Content", performance_score: "Performance", aeo_score: "AEO", geo_score: "GEO",
+  spy_score: "Overall", seo_score: "SEO", aeo_score: "AEO", geo_score: "GEO",
+  technical_score: "Technical", onpage_score: "On-page",
+  content_score: "Content", performance_score: "Performance",
 };
 
 export default function CompetitorsPage({ params }: { params: Promise<{ id: string }> }) {

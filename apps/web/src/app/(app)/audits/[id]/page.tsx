@@ -5,17 +5,26 @@ import { use as usePromise } from "react";
 import Link from "next/link";
 import { apiGet, apiPost } from "@/lib/api";
 import type { Audit, AuditIssue, AuditProgress, Recommendation } from "@/lib/api";
+import { SubScores } from "@/components/SubScores";
 import { CompareSelector } from "./CompareSelector";
 
-const SCORE_CARDS: { key: keyof Audit; label: string }[] = [
-  { key: "spy_score", label: "Spy Score" },
-  { key: "seo_score", label: "SEO" },
-  { key: "technical_score", label: "Technical" },
-  { key: "content_score", label: "Content" },
-  { key: "performance_score", label: "Performance" },
-  { key: "authority_score", label: "Authority" },
-  { key: "aeo_score", label: "AEO" },
-  { key: "geo_score", label: "GEO" },
+// The three scores answer different questions, so they get their own row
+// rather than sitting in a grid of eight equal-looking numbers.
+const HEADLINE_CARDS: { key: keyof Audit; label: string; blurb: string }[] = [
+  { key: "seo_score", label: "SEO", blurb: "Can a search engine crawl, index and rank it?" },
+  { key: "aeo_score", label: "AEO", blurb: "Can an answer engine lift an answer out of it?" },
+  { key: "geo_score", label: "GEO", blurb: "Can a generative system tell who wrote it?" },
+];
+
+// The seven components of the SEO score, with the weight each carries.
+const SEO_CARDS: { key: keyof Audit; label: string; weight: string }[] = [
+  { key: "technical_score", label: "Technical", weight: "25%" },
+  { key: "onpage_score", label: "On-page", weight: "20%" },
+  { key: "content_score", label: "Content", weight: "20%" },
+  { key: "internal_links_score", label: "Internal links", weight: "10%" },
+  { key: "structured_data_score", label: "Structured data", weight: "10%" },
+  { key: "performance_score", label: "Performance", weight: "10%" },
+  { key: "authority_score", label: "Authority", weight: "5%" },
 ];
 
 function scoreBand(score: number | null): string {
@@ -129,16 +138,53 @@ export default function AuditResultsPage({ params }: { params: Promise<{ id: str
         <button onClick={downloadReport} className="btn-secondary">Download PDF</button>
       </div>
 
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-        {SCORE_CARDS.map(({ key, label }) => {
+      <div className="card p-6 mb-4 text-center">
+        <div className={`text-5xl font-bold ${scoreBand(audit.spy_score)}`}>{audit.spy_score ?? "N/A"}</div>
+        <div className="text-xs text-muted uppercase tracking-wide mt-2">Overall Digital Search Score</div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-4">
+        {HEADLINE_CARDS.map(({ key, label, blurb }) => {
           const value = audit[key] as number | null;
           return (
             <div key={String(key)} className="card p-5 text-center">
               <div className={`text-3xl font-bold ${scoreBand(value)}`}>{value ?? "N/A"}</div>
               <div className="text-xs text-muted uppercase tracking-wide mt-1">{label}</div>
+              <div className="text-xs text-muted mt-2">{blurb}</div>
             </div>
           );
         })}
+      </div>
+
+      <h2 className="text-lg font-semibold mb-3 mt-8">SEO breakdown</h2>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">
+        {SEO_CARDS.map(({ key, label, weight }) => {
+          const value = audit[key] as number | null;
+          return (
+            <div key={String(key)} className="card p-5 text-center">
+              <div className={`text-2xl font-bold ${scoreBand(value)}`}>{value ?? "N/A"}</div>
+              <div className="text-xs text-muted uppercase tracking-wide mt-1">{label}</div>
+              <div className="text-[10px] text-muted mt-0.5">{weight} of SEO</div>
+            </div>
+          );
+        })}
+        <div className="card p-5 text-center">
+          <div className={`text-2xl font-bold ${scoreBand(audit.acrs_score)}`}>{audit.acrs_score ?? "N/A"}</div>
+          <div className="text-xs text-muted uppercase tracking-wide mt-1">ACRS</div>
+          <div className="text-[10px] text-muted mt-0.5">reported separately</div>
+        </div>
+      </div>
+      {audit.authority_score === null && (
+        <p className="text-xs text-muted mb-10">
+          Authority reads &ldquo;N/A&rdquo; because Spy&rsquo;s backlink index is built from its own crawls and has
+          nothing for this domain yet — that is not measured, not zero. Its weight is spread across the
+          other six components rather than counted as a failure.
+        </p>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-10 mt-6">
+        <SubScores title="AEO — answer engine readiness" section={audit.evidence?.aeo} />
+        <SubScores title="GEO — generative engine readiness" section={audit.evidence?.geo} />
       </div>
 
       <CompareSelector auditId={audit.id} projectId={audit.project_id} />

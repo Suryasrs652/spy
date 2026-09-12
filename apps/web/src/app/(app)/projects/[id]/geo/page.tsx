@@ -2,11 +2,7 @@ import Link from "next/link";
 import { serverApiGet } from "@/lib/serverApi";
 import { getLatestCompletedAudit } from "@/lib/latestAudit";
 import type { Project } from "@/lib/api";
-
-function Pct({ value }: { value: number | null | undefined }) {
-  if (value === undefined || value === null) return <span className="text-muted">—</span>;
-  return <span>{value.toFixed(0)}%</span>;
-}
+import { SubScores } from "@/components/SubScores";
 
 export default async function GeoPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
@@ -50,37 +46,35 @@ export default async function GeoPage({ params }: { params: Promise<{ id: string
             </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4 mb-8">
+          <SubScores title="The ten dimensions" section={geo} />
+
+          <div className="grid grid-cols-2 gap-4 mt-4 mb-8">
             <div className="card p-5">
               <div className="text-2xl font-bold">{geo.has_organization_schema ? "Yes" : "No"}</div>
               <div className="text-xs text-muted uppercase tracking-wide mt-1">Organization Schema Present</div>
             </div>
             <div className="card p-5">
-              <div className="text-2xl font-bold">{geo.has_person_or_product_schema ? "Yes" : "No"}</div>
-              <div className="text-xs text-muted uppercase tracking-wide mt-1">Person/Product Schema Present</div>
-            </div>
-            <div className="card p-5">
-              <div className="text-2xl font-bold"><Pct value={geo.schema_coverage_pct} /></div>
-              <div className="text-xs text-muted uppercase tracking-wide mt-1">Schema Coverage</div>
-            </div>
-            <div className="card p-5">
-              <div className="text-2xl font-bold"><Pct value={geo.citation_readiness_pct} /></div>
-              <div className="text-xs text-muted uppercase tracking-wide mt-1">Citation Readiness</div>
-            </div>
-            <div className="card p-5">
-              <div className="text-2xl font-bold"><Pct value={geo.org_field_completeness_pct} /></div>
+              <div className="text-2xl font-bold">
+                {geo.org_field_completeness_pct === null || geo.org_field_completeness_pct === undefined
+                  ? <span className="text-muted text-base">Not measured</span>
+                  : `${geo.org_field_completeness_pct.toFixed(0)}%`}
+              </div>
               <div className="text-xs text-muted uppercase tracking-wide mt-1">Org Field Completeness</div>
-            </div>
-            <div className="card p-5">
-              <div className="text-2xl font-bold"><Pct value={geo.entity_name_consistency_pct} /></div>
-              <div className="text-xs text-muted uppercase tracking-wide mt-1">Entity Name Consistency</div>
             </div>
           </div>
 
           <div className="card p-6 text-sm text-muted">
-            GEO evaluates how unambiguously this site&apos;s entity (organization, person, or product) is described
-            via structured data — a prerequisite for generative engines to recognize and cite it consistently. Spy
-            does not guarantee inclusion in any AI-generated answer.
+            GEO asks whether a generative system can tell who wrote this and reuse it. Read the dimensions in two
+            groups: <strong>entity recognition</strong>, <strong>knowledge graph signals</strong> and{" "}
+            <strong>AI-readable structure</strong> are markup problems someone can fix this afternoon;{" "}
+            <strong>fact density</strong>, <strong>citation readiness</strong> and <strong>topical authority</strong>{" "}
+            are writing problems, and no amount of schema will move them.
+            <br /><br />
+            <strong>Original information gain</strong> is always &ldquo;Not measured&rdquo;. Establishing that information
+            appears nowhere else needs a corpus to compare against, so it is listed as a real dimension and
+            deliberately left unscored rather than estimated. <strong>Topical authority</strong> covers the on-site
+            half only — depth and breadth of this site&apos;s own content; whether the wider web treats it as an
+            authority is not measured. Spy does not guarantee inclusion in any AI-generated answer.
           </div>
         </>
       )}
