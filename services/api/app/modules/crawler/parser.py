@@ -337,17 +337,22 @@ def _extract_images(soup: BeautifulSoup, result: ParsedPage) -> None:
     for img in soup.find_all("img"):
         result.images_total += 1
         alt = img.get("alt")
-        # An explicitly decorative image is *supposed* to carry alt="" —
-        # WCAG asks for exactly that so screen readers skip it. Counting it
-        # as a missing alt tells authors to describe images that should stay
-        # silent, which is actively worse for the people alt text exists
-        # for. Only the explicit markers count; a bare alt="" is still
-        # ambiguous enough to flag.
-        if img.get("aria-hidden") == "true" or img.get("role") == "presentation":
-            continue
-        if alt is None or not alt.strip():
+        # A present-but-empty alt="" is, on its own, the complete and
+        # correct way to mark an image decorative — WCAG Technique H67, and
+        # what every real accessibility checker (axe-core, WAVE, Lighthouse)
+        # accepts without asking for anything more. This used to also
+        # require aria-hidden="true" or role="presentation" before treating
+        # alt="" as intentional, on the theory that a bare empty alt was
+        # still ambiguous. It wasn't a theory that survived contact with a
+        # real site: audited against spilanthstudio.com's actual source, 73
+        # of its 77 alt="" images (a repeated nav-toggle logo, correctly
+        # decorated) carried neither marker and were all flagged as "missing
+        # alt text" — the single highest-ranked blocker in an already-
+        # delivered report, on a site with zero images actually missing alt.
+        # Only a genuinely absent alt attribute is missing now.
+        if alt is None:
             result.images_missing_alt += 1
-        elif _GENERIC_ALT_RE.match(alt.strip()):
+        elif alt.strip() and _GENERIC_ALT_RE.match(alt.strip()):
             result.images_generic_alt += 1
 
         if not (img.get("width") and img.get("height")):

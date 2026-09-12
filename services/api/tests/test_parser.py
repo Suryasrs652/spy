@@ -130,20 +130,44 @@ def test_plain_json_ld_object_still_parses() -> None:
 
 
 def test_decorative_images_are_not_counted_as_missing_alt() -> None:
-    """WCAG asks for alt="" on decorative images so screen readers skip
-    them. Counting that as a missing alt pushes authors to describe images
-    that should stay silent — worse for the people alt text is for.
+    """WCAG Technique H67: a present-but-empty alt="" is, by itself, the
+    complete and correct way to mark an image decorative — no additional
+    aria-hidden or role="presentation" is required by the standard, or by
+    any real accessibility checker. Counting alt="" as missing pushes
+    authors to describe images that should stay silent — worse for the
+    people alt text is for. Only a genuinely absent alt attribute is
+    "missing".
     """
     body = (
         '<img src="a.png" alt="A described photograph">'
         '<img src="spacer.png" alt="" aria-hidden="true">'
         '<img src="flourish.png" alt="" role="presentation">'
-        '<img src="logo.png" alt="">'          # ambiguous — still flagged
+        '<img src="logo.png" alt="">'           # bare alt="" — valid, not flagged
         '<img src="nope.png">'                  # no alt at all — flagged
     )
     result = _parse(body)
     assert result.images_total == 5
-    assert result.images_missing_alt == 2
+    assert result.images_missing_alt == 1
+
+
+def test_a_bare_empty_alt_repeated_across_a_page_is_never_flagged() -> None:
+    """The exact real-world shape this guards: spilanthstudio.com repeats
+    one decorative logo image (bare alt="", no aria-hidden/role marker) as
+    a nav-toggle icon on every page — 73 instances sitewide. None of them
+    are missing alt text; the alt attribute is there and correctly empty.
+    """
+    body = '<img src="logo.png" alt="">' * 5 + '<img src="hero.jpg" alt="A director framing a shot">'
+    result = _parse(body)
+    assert result.images_total == 6
+    assert result.images_missing_alt == 0
+
+
+def test_width_height_is_still_checked_on_a_decorative_image() -> None:
+    """Layout shift doesn't care whether an image is decorative — dropping
+    the old aria-hidden/role early-exit must not accidentally exempt these
+    images from the CLS check too."""
+    result = _parse('<img src="spacer.png" alt="" aria-hidden="true">')
+    assert result.images_missing_dimensions == 1
 
 
 def test_a_br_split_headline_is_not_glued_into_one_word() -> None:
