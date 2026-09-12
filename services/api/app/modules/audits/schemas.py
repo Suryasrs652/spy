@@ -164,3 +164,48 @@ class AuditComparisonOut(BaseModel):
     persisting_issues: list[IssueSummaryOut]
     page_count_baseline: int
     page_count_current: int
+
+
+class SeverityCountOut(BaseModel):
+    """Both numbers, because one issue affecting 70 pages and 70 issues
+    affecting one page each look identical with only one of them."""
+
+    issues: int
+    pages: int
+
+
+class IssueCountsOut(BaseModel):
+    critical: SeverityCountOut
+    high: SeverityCountOut
+    medium: SeverityCountOut
+    opportunities: SeverityCountOut
+
+
+class BlockerOut(BaseModel):
+    key: str
+    title: str
+    detail: str
+    what_to_do: str
+    """RULE — a finding naming specific pages. SIGNAL — a score component no
+    rule watches, which is where most citability problems live."""
+    source: str
+    """Points of the Overall Digital Search Score this is currently costing."""
+    points_recoverable: float
+    effort: int
+    effort_label: str
+    affected_pages: int | None = None
+    rule_id: str | None = None
+
+
+class AuditSummaryOut(BaseModel):
+    audit_id: uuid.UUID
+    status: str
+    score_version: str
+    spy_score: float | None = None
+    seo_score: float | None = None
+    aeo_score: float | None = None
+    geo_score: float | None = None
+    acrs_score: float | None = None
+    confidence: float | None = None
+    issue_counts: IssueCountsOut
+    blockers: list[BlockerOut] = []

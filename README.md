@@ -73,6 +73,15 @@ a weight anyway, so the omission is on the record rather than looking like an
 oversight. The one thing that is *not* treated as unmeasurable: a site where
 nothing is indexable scores zero, because that is a measurement.
 
+**Names the five things actually holding the site down.** Not the same list
+as the ranked fixes below, and the difference is the point: blockers are
+ordered by how much score each costs, and they are drawn from the AEO and GEO
+score components as well as from the rule findings. Around a hundred rules
+cover crawling, metadata and markup, and none of them fire on "no page carries
+a byline" or "one page in ten states a checkable figure" — without this, the
+reasons a generative system ignores a site move a number and never reach a
+list of things to do.
+
 **Ranks the fixes.** Findings become recommendations scored by
 `impact × confidence × reach ÷ effort` and grouped into Do Now / This Week /
 This Month / Monitor, so the list is ordered by leverage rather than by

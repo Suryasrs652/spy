@@ -147,6 +147,46 @@ export interface AuditEvidence {
   urls_processed?: number;
 }
 
+export interface SeverityCount {
+  issues: number;
+  pages: number;
+}
+
+export interface Blocker {
+  key: string;
+  title: string;
+  detail: string;
+  what_to_do: string;
+  /** RULE — a finding naming specific pages. SIGNAL — a score component no
+   *  rule watches, which is where most citability problems live. */
+  source: "RULE" | "SIGNAL";
+  /** Points of the Overall Digital Search Score this is currently costing. */
+  points_recoverable: number;
+  effort: number;
+  effort_label: "Low" | "Medium" | "High";
+  affected_pages: number | null;
+  rule_id: string | null;
+}
+
+export interface AuditSummary {
+  audit_id: string;
+  status: string;
+  score_version: string;
+  spy_score: number | null;
+  seo_score: number | null;
+  aeo_score: number | null;
+  geo_score: number | null;
+  acrs_score: number | null;
+  confidence: number | null;
+  issue_counts: {
+    critical: SeverityCount;
+    high: SeverityCount;
+    medium: SeverityCount;
+    opportunities: SeverityCount;
+  };
+  blockers: Blocker[];
+}
+
 export interface AuditPage {
   id: string;
   url: string;

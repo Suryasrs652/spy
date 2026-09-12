@@ -70,6 +70,7 @@ the reason (`WORKER_ERROR`, `DNS_FAILURE`, `ROBOTS_BLOCKED`, `BLOCKED_TARGET`…
 
 | Endpoint | Contents |
 | --- | --- |
+| `GET $BASE/audits/<id>/summary` | **Start here.** Scores, issue counts by severity, and the five things costing the most score |
 | `GET $BASE/audits/<id>` | Scores plus the `evidence` blob they were derived from |
 | `GET $BASE/audits/<id>/issues` | Findings: severity, rule_id, affected_count, description, recommendation |
 | `GET $BASE/audits/<id>/pages` | Per-page inventory — status, indexability, depth, word count, schema types, response time, internal PageRank |

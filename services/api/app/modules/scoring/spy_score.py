@@ -94,13 +94,26 @@ GEO_COMPONENT_WEIGHTS = {
     "original_information_gain": 0.05,
 }
 
-_SEVERITY_DEDUCTION = {"CRITICAL": 25, "HIGH": 15, "MEDIUM": 8, "LOW": 3, "INFO": 0}
+SEVERITY_DEDUCTION = {"CRITICAL": 25, "HIGH": 15, "MEDIUM": 8, "LOW": 3, "INFO": 0}
 
 _TECHNICAL_CATEGORIES = {"Crawlability", "Indexability", "Security", "International"}
 _ONPAGE_CATEGORIES = {"Metadata", "Images"}
 _CONTENT_CATEGORIES = {"Content"}
 _INTERNAL_LINK_CATEGORIES = {"Links"}
 _STRUCTURED_DATA_CATEGORIES = {"Structured Data"}
+
+# Which SEO component a rule's category feeds. Exported because the blocker
+# engine (app/modules/audits/blockers.py) has to work backwards from a stored
+# issue to how many points of the overall score it is actually costing, and
+# guessing that mapping separately is how two parts of one report start
+# disagreeing about what a finding is worth.
+CATEGORY_TO_SEO_COMPONENT = {
+    **{c: "technical" for c in _TECHNICAL_CATEGORIES},
+    **{c: "onpage" for c in _ONPAGE_CATEGORIES},
+    **{c: "content" for c in _CONTENT_CATEGORIES},
+    **{c: "internal_links" for c in _INTERNAL_LINK_CATEGORIES},
+    **{c: "structured_data" for c in _STRUCTURED_DATA_CATEGORIES},
+}
 
 # Schema types that mark a page up as an explicit question-and-answer unit.
 _FAQ_SCHEMA_TYPES = frozenset({"FAQPage", "QAPage", "HowTo"})
@@ -183,7 +196,7 @@ def _category_score(findings: list[RuleFinding], categories: set[str], total_pag
     for f in findings:
         if f.category not in categories:
             continue
-        weight = _SEVERITY_DEDUCTION.get(f.severity.value, 0)
+        weight = SEVERITY_DEDUCTION.get(f.severity.value, 0)
         deduction += weight * (f.affected_count / total_pages)
     return round(max(0.0, 100.0 - deduction), 2)
 

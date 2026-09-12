@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, ValidationAppError
 from app.db.base import utcnow
+from app.modules.audits.blockers import count_issues, find_blockers
 from app.modules.audits.models import (
     CURRENT_SCORE_VERSION,
     TERMINAL_STATUSES,
@@ -130,6 +131,32 @@ async def record_issue_validation(
     await db.commit()
     await db.refresh(issue)
     return issue
+
+
+async def get_audit_summary(
+    db: AsyncSession, *, organization_id: uuid.UUID, audit_id: uuid.UUID
+) -> dict:
+    """The headline read of an audit: the three scores, how many issues of
+    each severity, and the five things costing the most score.
+
+    Everything here is derived from rows already stored, so it stays in step
+    with the audit rather than becoming a second opinion about it.
+    """
+    audit = await get_audit(db, organization_id=organization_id, audit_id=audit_id)
+    issues = await list_audit_issues(db, organization_id=organization_id, audit_id=audit_id)
+    return {
+        "audit_id": audit.id,
+        "status": audit.status,
+        "score_version": audit.score_version,
+        "spy_score": audit.spy_score,
+        "seo_score": audit.seo_score,
+        "aeo_score": audit.aeo_score,
+        "geo_score": audit.geo_score,
+        "acrs_score": audit.acrs_score,
+        "confidence": audit.confidence,
+        "issue_counts": count_issues(issues),
+        "blockers": find_blockers(audit=audit, issues=issues),
+    }
 
 
 async def list_audit_pages(

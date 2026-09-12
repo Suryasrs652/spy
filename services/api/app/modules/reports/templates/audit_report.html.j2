@@ -44,6 +44,46 @@
     and reuse it. Confidence: {{ audit.confidence }}% (based on {{ evidence.urls_processed }} pages crawled).
   </p>
 
+  <h2>What&rsquo;s wrong</h2>
+  <div class="score-grid">
+    <div class="score-card"><div class="value">{{ issue_counts.critical.issues }}</div><div class="label">Critical issues</div></div>
+    <div class="score-card"><div class="value">{{ issue_counts.high.issues }}</div><div class="label">High priority</div></div>
+    <div class="score-card"><div class="value">{{ issue_counts.medium.issues }}</div><div class="label">Medium priority</div></div>
+    <div class="score-card"><div class="value">{{ issue_counts.opportunities.issues }}</div><div class="label">Opportunities</div></div>
+  </div>
+  <p class="muted">
+    Affecting {{ issue_counts.critical.pages }}, {{ issue_counts.high.pages }},
+    {{ issue_counts.medium.pages }} and {{ issue_counts.opportunities.pages }} pages respectively.
+    One issue across seventy pages and seventy issues on one page each look identical without
+    both numbers.
+  </p>
+
+  {% if blockers %}
+  <h2>Top {{ blockers|length }} thing{{ 's' if blockers|length != 1 else '' }} blocking growth</h2>
+  <p class="muted">
+    Ordered by how much score each is costing right now — drawn from the rule findings and from
+    the AEO/GEO signals no rule watches. The growth plan below is ordered differently, by
+    leverage, so it starts with the cheapest useful fix.
+  </p>
+  <table>
+    <thead><tr><th>#</th><th>Blocker</th><th>Worth</th><th>Effort</th></tr></thead>
+    <tbody>
+      {% for blocker in blockers %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>
+          <strong>{{ blocker.title }}</strong><br>
+          <span class="muted">{{ blocker.detail }}</span><br>
+          <strong>Do:</strong> {{ blocker.what_to_do }}
+        </td>
+        <td>{{ "%.1f"|format(blocker.points_recoverable) }} pts</td>
+        <td>{{ blocker.effort_label }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+
   <h2>SEO breakdown</h2>
   <div class="score-grid">
     <div class="score-card"><div class="value">{{ audit.technical_score }}</div><div class="label">Technical &middot; 25%</div></div>
@@ -93,7 +133,7 @@
   </ul>
   {% endif %}
 
-  <h2>Critical Issues ({{ issues|length }})</h2>
+  <h2>All issues ({{ issues|length }})</h2>
   <table>
     <thead><tr><th>Severity</th><th>Issue</th><th>Category</th><th>Affected</th></tr></thead>
     <tbody>

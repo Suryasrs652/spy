@@ -7,6 +7,8 @@ from pathlib import Path
 
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
+from app.modules.audits.blockers import count_issues, find_blockers
+
 _TEMPLATES_DIR = Path(__file__).parent / "templates"
 _env = Environment(
     loader=FileSystemLoader(str(_TEMPLATES_DIR)),
@@ -32,6 +34,10 @@ def render_audit_report_html(*, audit, project, issues, recommendations) -> str:
     evidence = audit.evidence or {}
     return template.render(
         audit=audit,
+        # Derived here rather than passed in, so the report cannot drift out
+        # of step with what the API returns for the same audit.
+        issue_counts=count_issues(issues),
+        blockers=find_blockers(audit=audit, issues=issues),
         project=project,
         issues=issues,
         recommendations=recommendations,

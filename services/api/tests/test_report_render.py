@@ -31,7 +31,16 @@ def _audit(score) -> SimpleNamespace:
     )
 
 
-def _render(pages, links=None, referring_domains=0):
+def _issue(rule_id, *, category, severity, affected, title):
+    """The shape the report reads off an AuditIssue row."""
+    return SimpleNamespace(
+        rule_id=rule_id, category=category, severity=severity, affected_count=affected,
+        title=title, description="Because of reasons.", recommendation="Fix it.",
+        score_impact=-1.0, confidence=1.0, validated=None, validation_note=None,
+    )
+
+
+def _render(pages, links=None, referring_domains=0, issues=None):
     score = compute_spy_score(
         pages=pages, findings=run_all_rules(pages, links or []), urls_processed=len(pages),
         links=links, referring_domains=referring_domains,
@@ -40,7 +49,7 @@ def _render(pages, links=None, referring_domains=0):
     html = render_audit_report_html(
         audit=_audit(score),
         project=SimpleNamespace(domain="example.com", canonical_origin="https://example.com"),
-        issues=[], recommendations=[],
+        issues=issues or [], recommendations=[],
     )
     return score, html
 
@@ -91,3 +100,41 @@ def test_report_explains_an_absent_authority_score() -> None:
     )
     assert with_backlinks_score.authority_score is not None
     assert "not measured, not as zero" not in with_backlinks_html
+
+
+def test_report_carries_the_issue_counts_and_the_blockers() -> None:
+    """These sections are derived inside the renderer rather than passed in,
+    so the report and the API cannot disagree about the same audit."""
+    pages = _clean_site()
+    issues = [
+        _issue("SEO_META_004", category="Metadata", severity="HIGH", affected=5,
+               title="Missing meta description"),
+        _issue("SEO_IMG_001", category="Images", severity="MEDIUM", affected=5,
+               title="Images missing alt text"),
+        _issue("SEO_SEC_010", category="Security", severity="LOW", affected=5,
+               title="Missing Referrer-Policy header"),
+    ]
+    _score, html = _render(pages, links=_citation_links(pages), issues=issues)
+
+    assert "What&rsquo;s wrong" in html or "What’s wrong" in html
+    assert "Critical issues" in html
+    assert "Opportunities" in html
+    assert "things blocking growth" in html
+    # A blocker drawn from a score component, which no rule produces.
+    assert "checkable figures" in html or "named author" in html
+
+
+def test_report_omits_the_blocker_section_when_nothing_is_blocking() -> None:
+    """An empty numbered list under a confident heading reads as a bug. If
+    nothing clears the threshold, the section is not rendered at all."""
+    # Enough substantial pages to clear topical depth *and* breadth, plus
+    # figures, dates, liftable prose and Q&A markup.
+    pages = _clean_site(40)
+    for page in pages:
+        page.word_count = 1200
+        page.statistic_count = 5
+        page.has_publication_date = True
+        page.paragraph_count, page.self_contained_paragraph_count = 4, 4
+        page.schema_types = ["Organization", "FAQPage", "Service"]
+    _score, html = _render(pages, links=_citation_links(pages))
+    assert "blocking growth" not in html

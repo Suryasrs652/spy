@@ -18,6 +18,7 @@ from app.modules.audits.schemas import (
     AuditOut,
     AuditPageOut,
     AuditProgressOut,
+    AuditSummaryOut,
     IssueValidationRequest,
     RecommendationOut,
 )
@@ -88,6 +89,22 @@ async def get_audit_progress(
 ) -> AuditProgressOut:
     job = await service.get_audit_progress(db, organization_id=ctx.organization_id, audit_id=audit_id)
     return AuditProgressOut.model_validate(job)
+
+
+@router.get("/{audit_id}/summary", response_model=AuditSummaryOut)
+async def get_audit_summary(
+    audit_id: uuid.UUID,
+    ctx: AuthContext = Depends(require_role(*ROLE_CAN_VIEW)),
+    db: AsyncSession = Depends(get_db),
+) -> AuditSummaryOut:
+    """Scores, issue counts by severity, and the five things costing the most
+    score — drawn from the rule findings *and* from the score components no
+    rule watches.
+    """
+    summary = await service.get_audit_summary(
+        db, organization_id=ctx.organization_id, audit_id=audit_id
+    )
+    return AuditSummaryOut.model_validate(summary)
 
 
 @router.get("/{audit_id}/issues", response_model=list[AuditIssueOut])

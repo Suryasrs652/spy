@@ -4,8 +4,9 @@ import { useCallback, useEffect, useState } from "react";
 import { use as usePromise } from "react";
 import Link from "next/link";
 import { apiGet, apiPost } from "@/lib/api";
-import type { Audit, AuditIssue, AuditProgress, Recommendation } from "@/lib/api";
+import type { Audit, AuditIssue, AuditProgress, AuditSummary, Recommendation } from "@/lib/api";
 import { SubScores } from "@/components/SubScores";
+import { IssueCounts, TopBlockers } from "@/components/Blockers";
 import { CompareSelector } from "./CompareSelector";
 
 // The three scores answer different questions, so they get their own row
@@ -46,6 +47,7 @@ export default function AuditResultsPage({ params }: { params: Promise<{ id: str
   const [progress, setProgress] = useState<AuditProgress | null>(null);
   const [issues, setIssues] = useState<AuditIssue[] | null>(null);
   const [recommendations, setRecommendations] = useState<Recommendation[] | null>(null);
+  const [summary, setSummary] = useState<AuditSummary | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const isTerminal = audit && ["COMPLETED", "FAILED", "CANCELLED"].includes(audit.status);
@@ -59,12 +61,14 @@ export default function AuditResultsPage({ params }: { params: Promise<{ id: str
       setAudit(a);
       setProgress(p);
       if (a.status === "COMPLETED") {
-        const [i, r] = await Promise.all([
+        const [i, r, sum] = await Promise.all([
           apiGet<AuditIssue[]>(`audits/${id}/issues`),
           apiGet<Recommendation[]>(`audits/${id}/recommendations`),
+          apiGet<AuditSummary>(`audits/${id}/summary`),
         ]);
         setIssues(i);
         setRecommendations(r);
+        setSummary(sum);
       }
     } catch {
       setError("Couldn't load this audit.");
@@ -155,6 +159,25 @@ export default function AuditResultsPage({ params }: { params: Promise<{ id: str
           );
         })}
       </div>
+
+      {summary && (
+        <>
+          <h2 className="text-lg font-semibold mb-3 mt-8">What&rsquo;s wrong</h2>
+          <div className="mb-6">
+            <IssueCounts summary={summary} />
+          </div>
+
+          <h2 className="text-lg font-semibold mb-1 mt-8">Top 5 things blocking growth</h2>
+          <p className="text-xs text-muted mb-3">
+            Ordered by how much score each is costing right now, drawn from the rule findings
+            <em> and </em> from the AEO/GEO signals no rule watches. The growth plan further down is
+            ordered differently — by leverage, so it starts with the cheapest useful fix.
+          </p>
+          <div className="mb-6">
+            <TopBlockers summary={summary} />
+          </div>
+        </>
+      )}
 
       <h2 className="text-lg font-semibold mb-3 mt-8">SEO breakdown</h2>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-3">

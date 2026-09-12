@@ -29,7 +29,27 @@ transcription of the issues list — they can read that themselves.
 Severity says how bad one instance is. Leverage is impact × reach ÷ effort, and
 it is what determines what to do first. A `LOW` finding on 89 pages that is
 twelve lines of host config outranks a `HIGH` on two pages needing a rewrite.
-`/audits/<id>/recommendations` already computes this — start there.
+`/audits/<id>/summary` and `/audits/<id>/recommendations` already compute
+this, and they answer different questions — use both rather than picking one:
+
+- **`summary.blockers`** is ordered by *magnitude*: how many points of the
+  Overall Digital Search Score each thing is costing right now. Crucially it
+  draws on the AEO and GEO score components as well as the rule findings,
+  which matters because no rule fires on "no page carries a byline" or "10% of
+  pages state a checkable figure" — those weaknesses exist only in the scores
+  and otherwise never reach a list of things to do. A blocker with
+  `source: SIGNAL` is one of those.
+- **`recommendations`** is ordered by *leverage* — `impact × confidence ×
+  reach ÷ effort` — so it starts with the cheapest useful fix.
+
+Lead with the blockers (what is actually holding the site down), then use the
+recommendations for sequencing (what to do on Monday). Saying which list is
+which matters: a reader who thinks they are the same list will wonder why the
+orders disagree.
+
+`summary.issue_counts` gives both `issues` and `pages` per severity. Quote
+both — one issue across seventy pages and seventy issues on one page each look
+identical with only one of them, and they are not the same site.
 
 Group by when, not by category: this week / this month / this quarter. Put the
 effort next to each item. "Write 75 alt attributes" is honest; "add alt text"
