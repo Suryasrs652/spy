@@ -144,3 +144,37 @@ def test_decorative_images_are_not_counted_as_missing_alt() -> None:
     result = _parse(body)
     assert result.images_total == 5
     assert result.images_missing_alt == 2
+
+
+def test_a_br_split_headline_is_not_glued_into_one_word() -> None:
+    """`<h1>Commercial<br>Ads</h1>` is a common two-line headline pattern —
+    verified on spilanthstudio.com/services/commercial-ads.html, whose stored
+    h1 read "CommercialAds" before this fix because a bare <br> carries no
+    text node for get_text() to insert a boundary at."""
+    result = _parse("<h1>Commercial<br>Ads</h1>")
+    assert result.h1 == "Commercial Ads"
+
+
+def test_a_br_split_heading_below_h1_is_also_fixed() -> None:
+    """Same fix, same call site pattern — not just h1."""
+    result = _parse("<h2>Our<br>Work</h2>")
+    assert result.heading_sequence == ["h2"]  # sanity: one heading present
+    # h2 text isn't stored on ParsedPage directly; confirm via question
+    # detection instead, which reads the same _text_of() extraction.
+    result2 = _parse("<h2>क्या<br>है</h2>")  # "what is" split across <br>
+    assert result2.question_heading_count == 1
+
+
+def test_ordinary_single_line_headings_are_unaffected() -> None:
+    """The fix must not introduce a space where the source has none — only
+    across an element boundary that previously had nothing between it."""
+    result = _parse("<h1>Commercial Ads</h1>")
+    assert result.h1 == "Commercial Ads"
+
+
+def test_anchor_text_across_an_inline_tag_is_also_joined() -> None:
+    """The same get_text()-with-no-separator bug affects anchor text
+    whenever a link wraps a <br> or an inline element — same fix, same call
+    site pattern."""
+    result = _parse('<a href="/x">Read<br>more</a>')
+    assert result.links[0].anchor_text == "Read more"

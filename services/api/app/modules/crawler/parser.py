@@ -189,6 +189,19 @@ def _clean_text(text: str | None) -> str | None:
     return cleaned or None
 
 
+def _text_of(tag) -> str:
+    """`tag.get_text()` with no separator glues text across child-element
+    boundaries with nothing between them — a heading written as
+    `<h1>Commercial<br>Ads</h1>` (a common two-line headline pattern) comes
+    back as "CommercialAds", one word, because a bare `<br>` carries no text
+    node of its own. `separator=" "` fixes that; `_clean_text` already
+    collapses whatever extra whitespace it introduces elsewhere, so this is
+    the same string for ordinary single-line text and a correct one for
+    tag-split text.
+    """
+    return tag.get_text(separator=" ")
+
+
 def parse_html(*, page_url: str, html: str, base_origin: str) -> ParsedPage:
     soup = BeautifulSoup(html, "lxml")
     result = ParsedPage()
@@ -196,7 +209,7 @@ def parse_html(*, page_url: str, html: str, base_origin: str) -> ParsedPage:
     result.html_hash = hashlib.sha256(html.encode("utf-8", errors="ignore")).hexdigest()
 
     title_tag = soup.find("title")
-    result.title = _clean_text(title_tag.get_text() if title_tag else None)
+    result.title = _clean_text(_text_of(title_tag) if title_tag else None)
 
     meta_desc = soup.find("meta", attrs={"name": re.compile("^description$", re.I)})
     result.meta_description = _clean_text(meta_desc.get("content") if meta_desc else None)
@@ -250,7 +263,7 @@ def parse_html(*, page_url: str, html: str, base_origin: str) -> ParsedPage:
 def _extract_headings(soup: BeautifulSoup, result: ParsedPage) -> None:
     h1_tags = soup.find_all("h1")
     result.h1_count = len(h1_tags)
-    result.h1 = _clean_text(h1_tags[0].get_text()) if h1_tags else None
+    result.h1 = _clean_text(_text_of(h1_tags[0])) if h1_tags else None
     result.h2_count = len(soup.find_all("h2"))
     result.h3_count = len(soup.find_all("h3"))
 
@@ -259,7 +272,7 @@ def _extract_headings(soup: BeautifulSoup, result: ParsedPage) -> None:
     result.heading_sequence = sequence
 
     for tag in heading_tags:
-        text = (_clean_text(tag.get_text()) or "").strip()
+        text = (_clean_text(_text_of(tag)) or "").strip()
         if not text:
             continue
         if _is_question_heading(text):
@@ -500,7 +513,7 @@ def _extract_links(soup: BeautifulSoup, *, page_url: str, base_origin: str) -> l
         links.append(
             ExtractedLink(
                 target_url=normalized,
-                anchor_text=_clean_text(a.get_text()),
+                anchor_text=_clean_text(_text_of(a)),
                 nofollow="nofollow" in rel_values,
                 ugc="ugc" in rel_values,
                 sponsored="sponsored" in rel_values,
