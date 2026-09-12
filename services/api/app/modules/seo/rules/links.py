@@ -48,12 +48,14 @@ def orphan_pages(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # Orphaned *within the crawled set*. A link rendered by JavaScript, or one
+    # from beyond the crawl limit, looks identical.
     return RuleFinding(
         "SEO_LINK_002", "Links", Severity.MEDIUM,
         "Orphan pages",
         "These indexable pages have no internal links pointing to them from any other crawled page, making them hard for both users and search engines to discover.",
         "Add internal links from relevant pages (navigation, related content, sitemap) to these URLs.",
-        score_impact=-1.5 * len(affected), affected=affected,
+        score_impact=-1.5 * len(affected), confidence=0.8, affected=affected,
     )
 
 
@@ -95,13 +97,15 @@ def broken_external_links(ctx: RuleContext) -> RuleFinding | None:
     if not affected:
         return None
     total = sum(len(t["broken_targets"]) for _, t in affected)
+    # Checked with one request; some hosts serve 404 to anything that isn't a
+    # browser even when the page is fine.
     return RuleFinding(
         "SEO_LINK_004", "Links", Severity.MEDIUM,
         "Broken external links",
         "Some outbound links point at external pages that returned an error when checked — a poor experience "
         "for anyone who clicks them, and a weak trust signal.",
         "Update or remove links to external pages that no longer exist.",
-        score_impact=-0.5 * total, affected=affected,
+        score_impact=-0.5 * total, confidence=0.8, affected=affected,
     )
 
 
@@ -134,13 +138,15 @@ def excessive_outbound_external_links(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # A threshold — a resource or directory page legitimately links out a
+    # great deal.
     return RuleFinding(
         "SEO_LINK_006", "Links", Severity.LOW,
         "Excessive outbound external links",
         f"These pages link out to more than {limit} external domains/pages, which can dilute link equity and "
         "occasionally reads as a low-quality or link-farm page.",
         "Trim outbound links to only the most relevant, valuable ones.",
-        score_impact=-0.25 * len(affected), affected=affected,
+        score_impact=-0.25 * len(affected), confidence=0.7, affected=affected,
     )
 
 
@@ -251,13 +257,15 @@ def excessive_internal_links_on_page(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # A threshold, and a large navigation menu clears it on every page of some
+    # perfectly ordinary sites.
     return RuleFinding(
         "SEO_LINK_012", "Links", Severity.LOW,
         "Excessive internal links on a page",
         f"These pages link internally to more than {limit} other URLs, which dilutes the link-equity each "
         "individual link passes and can overwhelm both users and crawlers.",
         "Trim navigation/footer links or restructure the page to link only to the most relevant URLs.",
-        score_impact=-0.1 * len(affected), affected=affected,
+        score_impact=-0.1 * len(affected), confidence=0.7, affected=affected,
     )
 
 
@@ -273,6 +281,7 @@ def low_average_internal_linking(ctx: RuleContext) -> RuleFinding | None:
     if avg >= min_avg:
         return None
     homepage = min(ctx.crawled(), key=lambda p: p.crawl_depth)
+    # An average over the pages this crawl reached.
     return RuleFinding(
         "SEO_LINK_013", "Links", Severity.MEDIUM,
         "Weak internal linking site-wide",
@@ -280,7 +289,7 @@ def low_average_internal_linking(ctx: RuleContext) -> RuleFinding | None:
         "healthy baseline — weak internal linking makes it harder for both users and search engines to "
         "discover related content.",
         "Add more contextual internal links (related content, navigation, in-body links) across the site.",
-        score_impact=-1.5, affected=[(homepage.id, {"url": homepage.url, "avg_internal_links": round(avg, 2)})],
+        score_impact=-1.5, confidence=0.8, affected=[(homepage.id, {"url": homepage.url, "avg_internal_links": round(avg, 2)})],
     )
 
 
@@ -325,13 +334,15 @@ def anchor_text_over_optimization(ctx: RuleContext) -> RuleFinding | None:
     homepage = min(ctx.crawled(), key=lambda p: p.crawl_depth, default=None)
     if homepage is None:
         return None
+    # Says "possible" for a reason: one navigation label repeated site-wide
+    # scores the same as deliberate anchor manipulation.
     return RuleFinding(
         "SEO_LINK_015", "Links", Severity.LOW,
         "Possible internal anchor-text over-optimization",
         f"The exact anchor text \"{top_anchor}\" is used on {ratio:.0%} of all internal links site-wide — "
         "heavy repetition of one exact-match phrase can look manipulative to search engines.",
         "Vary internal link anchor text naturally instead of repeating the same exact phrase.",
-        score_impact=-0.5, affected=[(homepage.id, {"url": homepage.url, "anchor_text": top_anchor, "ratio": round(ratio, 2)})],
+        score_impact=-0.5, confidence=0.5, affected=[(homepage.id, {"url": homepage.url, "anchor_text": top_anchor, "ratio": round(ratio, 2)})],
     )
 
 
@@ -350,13 +361,14 @@ def weakly_linked_sitemap_pages(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # PageRank computed over the crawled subgraph only.
     return RuleFinding(
         "SEO_LINK_016", "Links", Severity.LOW,
         "Sitemap pages with weak internal linking",
         "These pages are listed in the sitemap (signaling they matter) but internal linking gives them very "
         "little link equity relative to the rest of the site.",
         "Add contextual internal links from higher-authority pages (navigation, related content) to these URLs.",
-        score_impact=-0.25 * len(affected), affected=affected,
+        score_impact=-0.25 * len(affected), confidence=0.8, affected=affected,
     )
 
 

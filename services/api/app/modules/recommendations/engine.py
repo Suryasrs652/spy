@@ -23,7 +23,17 @@ _CATEGORY_EFFORT = {
     "International": 5,
 }
 
-_MAX_RAW_PRIORITY = 10 * 10 * 1.0  # impact(10) * confidence(10) / effort(1)
+_MIN_EFFORT = min(_CATEGORY_EFFORT.values())
+
+# The ceiling the raw score is normalized against: the most urgent thing the
+# formula can describe — a maximum-impact certainty affecting the whole site,
+# in the cheapest category there is.
+#
+# This used to divide by an effort of 1, which no category has. Nothing could
+# score above 50 as a result, and since DO_NOW needs 60 and THIS_WEEK needs
+# 40, the two buckets a reader actually works from were unreachable: every
+# audit ever run here filed everything under THIS_MONTH or MONITOR.
+_MAX_RAW_PRIORITY = 10 * 10 * 1.0 / _MIN_EFFORT
 
 
 def _group_for(priority_score: float, severity: str) -> str:
@@ -53,7 +63,13 @@ def build_recommendations(
         severity = f.severity.value
         impact = _SEVERITY_IMPACT.get(severity, 1)
         reach = min(1.0, f.affected_count / total_pages)  # 0..1 fraction of the site
-        confidence = 10  # deterministic rule match — always maximum confidence (§3)
+        # The rule says how much of its own finding is observation rather
+        # than inference (see rules/base.py). Most rules read a fact off the
+        # page and score the full 10; a threshold heuristic scores less, and
+        # is ranked below a certainty of the same severity and reach. This
+        # used to be hardcoded to 10, which ranked "possible keyword
+        # stuffing" as confidently as a missing title tag.
+        confidence = round(f.confidence * 10)
         effort = _CATEGORY_EFFORT.get(f.category, 5)
 
         raw_priority = impact * confidence * reach / effort

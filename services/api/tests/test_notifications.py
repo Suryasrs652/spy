@@ -9,6 +9,7 @@ is real rather than incidental.
 """
 from __future__ import annotations
 
+import asyncio
 import uuid
 
 import pytest
@@ -148,9 +149,19 @@ async def test_audit_run_creates_audit_completed_notification(client, db, auth_h
     audit = await wait_for_audit_terminal(db, audit_id, timeout=60)
     assert audit.status == AuditStatus.COMPLETED.value
 
-    notifications = (
-        await db.execute(select(Notification).where(Notification.user_id == user_id))
-    ).scalars().all()
+    # The worker commits the COMPLETED status and the notification in two
+    # separate transactions, so polling for a terminal status can land in the
+    # gap between them. Wait for the notification itself rather than assuming
+    # the first commit implies the second.
+    notifications = []
+    for _ in range(100):
+        db.expire_all()
+        notifications = (
+            await db.execute(select(Notification).where(Notification.user_id == user_id))
+        ).scalars().all()
+        if any(n.type == NotificationType.AUDIT_COMPLETED.value for n in notifications):
+            break
+        await asyncio.sleep(0.1)
     assert any(n.type == NotificationType.AUDIT_COMPLETED.value for n in notifications)
 
     list_resp = await client.get("/api/v1/notifications", headers=headers)

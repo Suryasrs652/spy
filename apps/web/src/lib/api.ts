@@ -184,6 +184,12 @@ export interface AuditIssue {
   recommendation: string;
   affected_count: number;
   score_impact: number;
+  /** 0-1: how much of this finding is observation rather than inference. */
+  confidence: number;
+  /** null means nobody has checked it yet — not that it failed a check. */
+  validated: boolean | null;
+  validated_at: string | null;
+  validation_note: string | null;
 }
 
 export interface Recommendation {

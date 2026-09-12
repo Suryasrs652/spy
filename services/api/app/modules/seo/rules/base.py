@@ -43,6 +43,28 @@ DEFAULT_THRESHOLDS = {
 }
 
 
+# How much of what a rule reports is observation, and how much is inference.
+#
+# A rule that looks for a canonical tag and doesn't find one is certain:
+# the tag is absent, and no amount of second-guessing changes that. A rule
+# that reports "keyword stuffing" from a word-frequency ratio is not — the
+# same ratio comes out of a page that legitimately repeats its own product
+# name. Both are worth reporting. Reporting them as equally certain is what
+# teaches a reader to distrust the whole audit.
+#
+# Read it as: of the instances this rule flags, what share would survive a
+# human opening the page and looking? Rules declare it only when it is below
+# CERTAIN, so the default stays the honest one for the ~80 rules that read a
+# fact straight off the page.
+#
+# It is not severity. Severity is how much the issue costs if real;
+# confidence is whether it is real. A low-severity certainty (missing
+# favicon) and a high-severity guess (possible anchor over-optimization) are
+# different kinds of thing, and the priority formula in
+# app/modules/recommendations/engine.py multiplies them for that reason.
+CERTAIN = 1.0
+
+
 @dataclass
 class RuleFinding:
     rule_id: str
@@ -52,6 +74,7 @@ class RuleFinding:
     description: str
     recommendation: str
     score_impact: float
+    confidence: float = CERTAIN
     affected: list[tuple[uuid.UUID, dict]] = field(default_factory=list)
 
     @property

@@ -52,13 +52,14 @@ def excessive_image_count(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # A threshold. A gallery is supposed to have many images.
     return RuleFinding(
         "SEO_IMG_004", "Images", Severity.LOW,
         "Excessive number of images on a page",
         f"These pages embed more than {_EXCESSIVE_IMAGE_COUNT} images, which typically means slow load "
         "times and a heavier crawl/render cost for very little added SEO value.",
         "Paginate large galleries, lazy-load below-the-fold images, or split the content across pages.",
-        score_impact=-0.25 * len(affected), affected=affected,
+        score_impact=-0.25 * len(affected), confidence=0.7, affected=affected,
     )
 
 
@@ -71,11 +72,13 @@ def images_generic_alt_text(ctx: RuleContext) -> RuleFinding | None:
     if not affected:
         return None
     total = sum(a[1]["generic_alt_count"] for a in affected)
+    # Matched against known-generic strings — catches the common cases,
+    # mislabels a genuinely terse description.
     return RuleFinding(
         "SEO_IMG_003", "Images", Severity.LOW,
         "Non-descriptive alt text",
         "Some images use alt text that's just a filename or a generic placeholder (e.g. \"image1.jpg\"), "
         "which gives no real information to screen readers or image search.",
         "Replace generic alt text with a short, specific description of each image.",
-        score_impact=-0.15 * total, affected=affected,
+        score_impact=-0.15 * total, confidence=0.7, affected=affected,
     )

@@ -5,7 +5,7 @@ import uuid
 from datetime import datetime
 from enum import StrEnum
 
-from sqlalchemy import DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,6 +42,22 @@ class AuditIssue(UUIDPKMixin, Base):
 
     affected_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     score_impact: Mapped[float] = mapped_column(Numeric(5, 2), nullable=False, default=0)
+
+    # 0-1: how much of this finding is observation rather than inference.
+    # Declared per rule (app/modules/seo/rules/base.py) and carried through to
+    # the priority formula, so "possible keyword stuffing" cannot outrank a
+    # missing title on affected-page count alone.
+    confidence: Mapped[float] = mapped_column(Numeric(3, 2), nullable=False, default=1.0)
+
+    # Whether a human or the evidence-validator agent has since checked this
+    # finding against the live site. NULL is the honest default and means
+    # *unchecked* — deliberately distinct from False, which is a recorded
+    # verdict that the finding did not hold up.
+    validated: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+    validated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Why the verdict went the way it did — the part a reader actually needs
+    # when a finding is marked false ("canonical is there, injected by JS").
+    validation_note: Mapped[str | None] = mapped_column(Text)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utcnow, nullable=False)
 

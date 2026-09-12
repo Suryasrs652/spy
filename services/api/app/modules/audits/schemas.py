@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 
 class AuditCreateRequest(BaseModel):
@@ -62,6 +62,18 @@ class AuditIssueOut(BaseModel):
     recommendation: str
     affected_count: int
     score_impact: float
+    confidence: float
+    # None means unchecked, not "failed validation" — see AuditIssue.
+    validated: bool | None = None
+    validated_at: datetime | None = None
+    validation_note: str | None = None
+
+
+class IssueValidationRequest(BaseModel):
+    """A verdict on one finding after checking it against the live site."""
+
+    validated: bool
+    note: str | None = Field(default=None, max_length=2000)
 
 
 class AuditPageOut(BaseModel):

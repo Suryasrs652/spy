@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.errors import ConflictError, NotFoundError, ValidationAppError
+from app.db.base import utcnow
 from app.modules.audits.models import (
     CURRENT_SCORE_VERSION,
     TERMINAL_STATUSES,
@@ -90,6 +91,45 @@ async def list_audit_issues(
     issues = list(result.scalars().all())
     issues.sort(key=lambda i: SEVERITY_ORDER.get(Severity(i.severity), 99))
     return issues
+
+
+async def record_issue_validation(
+    db: AsyncSession,
+    *,
+    organization_id: uuid.UUID,
+    audit_id: uuid.UUID,
+    issue_id: uuid.UUID,
+    validated: bool,
+    note: str | None = None,
+) -> AuditIssue:
+    """Record whether a finding held up when someone checked it against the
+    live site.
+
+    The rule engine can only report what the crawl saw. Anything it flags
+    can still be wrong — markup injected after load, a host that answers
+    bots differently, a threshold that doesn't fit this site. This is where
+    that verdict lands, so a finding already shown to be false stops being
+    re-litigated by every reader of the report.
+
+    The verdict never edits the finding itself: `severity`, `confidence` and
+    the evidence rows stay exactly as the rules produced them, which is what
+    keeps an audit re-derivable from its own crawl (§21).
+    """
+    audit = await get_audit(db, organization_id=organization_id, audit_id=audit_id)
+    issue = (
+        await db.execute(
+            select(AuditIssue).where(AuditIssue.id == issue_id, AuditIssue.audit_id == audit.id)
+        )
+    ).scalar_one_or_none()
+    if issue is None:
+        raise NotFoundError("Audit issue not found.")
+
+    issue.validated = validated
+    issue.validated_at = utcnow()
+    issue.validation_note = note
+    await db.commit()
+    await db.refresh(issue)
+    return issue
 
 
 async def list_audit_pages(

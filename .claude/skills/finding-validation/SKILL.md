@@ -31,6 +31,42 @@ not gone away, so check anything in these families every time.
 | "Title/description length" on non-Latin text | Read the actual title | Measured by display width, which approximates but is not pixels. Borderline cases on Indic/CJK are advisory |
 | "Missing security headers" | `curl -sI <url>` | Rarely wrong — but confirm anyway, it is one request |
 
+## Start with the rule's own confidence
+
+Every finding carries a `confidence` between 0 and 1, declared by the rule
+that produced it (`services/api/app/modules/seo/rules/base.py`). It says how
+much of the finding is observation and how much is inference:
+
+- **1.0** — the rule read a fact off the page. There is no canonical tag;
+  the header is absent; two pages hash identically. Check these when they
+  surprise you, not as a matter of course.
+- **below 1.0** — the rule inferred the problem from a threshold or a
+  pattern. `SEO_CONTENT_008` (0.5) cannot tell keyword stuffing from a page
+  that repeats its own product name; `SEO_LINK_002` (0.8) cannot see a link
+  rendered by JavaScript. **Check every one of these before reporting it.**
+
+Sort by confidence ascending and start at the top. The list is short — 21 of
+the 101 rules declare anything below certainty — and it is exactly the list
+of findings most likely to waste someone's afternoon.
+
+## Recording the verdict
+
+A check nobody can see gets repeated by the next reader. Write it back:
+
+```bash
+curl -s -X PATCH "$SPY_API/audits/$AUDIT_ID/issues/$ISSUE_ID/validation"   -H "Content-Type: application/json"   -d '{"validated": false, "note": "Canonical is present, injected by JS after load."}'
+```
+
+`validated` is `null` until someone checks — deliberately distinct from
+`false`, which is a recorded verdict that the finding did not hold up. Never
+report an unchecked finding as though it had been confirmed, and never mark
+one `true` on the strength of the stored evidence alone; the point of the
+field is that a human or an agent went and looked.
+
+The verdict never edits the finding. Severity, confidence and the evidence
+rows stay exactly as the rules produced them, so the audit stays re-derivable
+from its own crawl.
+
 ## The general method
 
 1. **Pick the specific page** the finding names, not a representative one.

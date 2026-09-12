@@ -152,10 +152,39 @@ export default function AuditResultsPage({ params }: { params: Promise<{ id: str
                 {issue.severity}
               </span>
               <span className="font-medium">{issue.title}</span>
+              {issue.validated === true && (
+                <span
+                  className="text-[10px] uppercase font-semibold rounded px-2 py-0.5 border border-green-600 text-green-700"
+                  title={issue.validation_note ?? "Checked against the live site and confirmed."}
+                >
+                  Verified
+                </span>
+              )}
+              {issue.validated === false && (
+                <span
+                  className="text-[10px] uppercase font-semibold rounded px-2 py-0.5 border border-muted text-muted"
+                  title={issue.validation_note ?? "Checked against the live site and did not hold up."}
+                >
+                  Not confirmed
+                </span>
+              )}
+              {issue.validated === null && issue.confidence < 1 && (
+                <span
+                  className="text-[10px] uppercase font-semibold rounded px-2 py-0.5 border border-amber-500 text-amber-700"
+                  title={`This rule infers the problem rather than observing it directly (${Math.round(
+                    issue.confidence * 100
+                  )}% confidence). Check a page before acting on it.`}
+                >
+                  Verify first
+                </span>
+              )}
               <span className="text-xs text-muted ml-auto">{issue.affected_count} page(s)</span>
             </div>
             <p className="text-sm text-muted mt-2">{issue.description}</p>
             <p className="text-sm mt-2"><strong>Fix:</strong> {issue.recommendation}</p>
+            {issue.validated === false && issue.validation_note && (
+              <p className="text-sm text-muted mt-2"><strong>Checked:</strong> {issue.validation_note}</p>
+            )}
           </div>
         ))}
         {issues?.length === 0 && <div className="card p-6 text-muted text-sm">No issues found — great work.</div>}

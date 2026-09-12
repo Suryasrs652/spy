@@ -25,10 +25,13 @@ exactly that. Fetch the specific page the finding names. Fetch headers for
 header claims, HTML for markup claims, the target URL for link claims. Grep for
 the exact condition, not something adjacent.
 
-Prioritise by consequence. A finding that would send someone to rewrite 70
-pages deserves checking more than a cosmetic one. Always check anything in the
-known false-positive families: structured data, external links, sitemaps,
-hreflang, and length rules on non-Latin text.
+Prioritise by consequence and by the rule's own confidence. Every finding
+carries a `confidence` between 0 and 1 saying how much of it the rule observed
+versus inferred; anything below 1.0 is the rule telling you in advance that it
+is guessing. Sort ascending and start there. After that, a finding that would
+send someone to rewrite 70 pages deserves checking more than a cosmetic one.
+Always check anything in the known false-positive families: structured data,
+external links, sitemaps, hreflang, and length rules on non-Latin text.
 
 **Also check the other direction.** A missing number is not a zero:
 `authority_score: null` is "not measured"; `evidence.aeo`/`geo` carrying a
@@ -47,6 +50,13 @@ Three lists:
    report as problems, and they must not be silently dropped either: a false
    positive means a rule needs fixing.
 3. **Unverified** — you could not establish it either way, and why.
+
+Record each verdict against the issue so the next reader inherits it instead
+of repeating your work — `PATCH /audits/{audit_id}/issues/{issue_id}/validation`
+with `{"validated": true|false, "note": "..."}`. The note is the part that
+matters: say what you fetched and what you saw. Leave anything you could not
+establish unvalidated; `null` means unchecked, and claiming otherwise defeats
+the point of the field.
 
 Never expand scope into new findings of your own. Your output is a verdict on
 the input, not another analysis.

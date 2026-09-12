@@ -18,6 +18,7 @@ from app.modules.audits.schemas import (
     AuditOut,
     AuditPageOut,
     AuditProgressOut,
+    IssueValidationRequest,
     RecommendationOut,
 )
 from app.modules.auth.models import User
@@ -97,6 +98,29 @@ async def get_audit_issues(
 ) -> list[AuditIssueOut]:
     issues = await service.list_audit_issues(db, organization_id=ctx.organization_id, audit_id=audit_id)
     return [AuditIssueOut.model_validate(i) for i in issues]
+
+
+@router.patch("/{audit_id}/issues/{issue_id}/validation", response_model=AuditIssueOut)
+async def validate_audit_issue(
+    audit_id: uuid.UUID,
+    issue_id: uuid.UUID,
+    payload: IssueValidationRequest,
+    ctx: AuthContext = Depends(require_role(*ROLE_CAN_RUN_AUDITS)),
+    db: AsyncSession = Depends(get_db),
+) -> AuditIssueOut:
+    """Record that a finding was checked against the live site, and how it
+    went. Findings start unvalidated (`null`), which is a different thing
+    from having been checked and rejected (`false`).
+    """
+    issue = await service.record_issue_validation(
+        db,
+        organization_id=ctx.organization_id,
+        audit_id=audit_id,
+        issue_id=issue_id,
+        validated=payload.validated,
+        note=payload.note,
+    )
+    return AuditIssueOut.model_validate(issue)
 
 
 @router.get("/{audit_id}/pages", response_model=list[AuditPageOut])

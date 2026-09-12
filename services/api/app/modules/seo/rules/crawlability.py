@@ -131,13 +131,14 @@ def slow_response_times(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # One timing sample over a shared connection, not a benchmark.
     return RuleFinding(
         "SEO_CRAWL_008", "Crawlability", Severity.MEDIUM,
         "Slow server response times",
         f"These pages took more than {threshold}ms to respond, which both hurts user experience and can "
         "reduce how much of the site search engines crawl per visit.",
         "Investigate server/application performance for these URLs (caching, database queries, hosting tier).",
-        score_impact=-0.5 * len(affected), affected=affected,
+        score_impact=-0.5 * len(affected), confidence=0.7, affected=affected,
     )
 
 

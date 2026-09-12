@@ -21,12 +21,14 @@ def thin_content(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # A word count is exact; "thin" is the judgement. Contact, pricing and
+    # legal pages are legitimately short.
     return RuleFinding(
         "SEO_CONTENT_001", "Content", Severity.MEDIUM,
         "Thin content",
         f"These pages have fewer than {threshold} words of visible text, which rarely satisfies search intent.",
         "Expand the content with genuinely useful information, or consolidate into a fuller page.",
-        score_impact=-1 * len(affected), affected=affected,
+        score_impact=-1 * len(affected), confidence=0.8, affected=affected,
     )
 
 
@@ -68,12 +70,14 @@ def excessive_crawl_depth(ctx: RuleContext) -> RuleFinding | None:
     affected = [(p.id, {"url": p.url, "crawl_depth": p.crawl_depth}) for p in ctx.pages if p.crawl_depth > max_depth]
     if not affected:
         return None
+    # Depth is measured from this crawl's entry point in BFS order, which
+    # isn't always the shortest path a user would take.
     return RuleFinding(
         "SEO_CONTENT_004", "Content", Severity.LOW,
         "Pages buried too deep in the site structure",
         f"These pages are more than {max_depth} clicks from the homepage, which weakens their internal link equity and discoverability.",
         "Add links from higher-level pages to bring important content closer to the homepage.",
-        score_impact=-0.5 * len(affected), affected=affected,
+        score_impact=-0.5 * len(affected), confidence=0.7, affected=affected,
     )
 
 
@@ -92,13 +96,15 @@ def low_text_to_html_ratio(ctx: RuleContext) -> RuleFinding | None:
             affected.append((p.id, {"url": p.url, "estimated_ratio": round(ratio, 3)}))
     if not affected:
         return None
+    # A proxy for template bloat. An app shell produces the same ratio while
+    # being exactly what it should be.
     return RuleFinding(
         "SEO_CONTENT_005", "Content", Severity.LOW,
         "Low text-to-HTML ratio",
         "These pages have very little visible text relative to their HTML size, often a sign of markup-heavy, "
         "content-light templates that search engines may treat as low-value.",
         "Reduce unnecessary markup/scripts, or add more substantive content.",
-        score_impact=-0.5 * len(affected), affected=affected,
+        score_impact=-0.5 * len(affected), confidence=0.6, affected=affected,
     )
 
 
@@ -185,11 +191,13 @@ def possible_keyword_stuffing(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # The weakest inference in the rule set: a page repeating its own product
+    # name is indistinguishable from one stuffing a keyword.
     return RuleFinding(
         "SEO_CONTENT_008", "Content", Severity.MEDIUM,
         "Possible keyword stuffing",
         "On these pages, a single word makes up an unusually large share of all visible text — a common "
         "symptom of keyword stuffing, which search engines penalize.",
         "Rewrite the content naturally; vary phrasing instead of repeating the same word or phrase.",
-        score_impact=-1 * len(affected), affected=affected,
+        score_impact=-1 * len(affected), confidence=0.5, affected=affected,
     )

@@ -54,12 +54,14 @@ def title_length(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # Search engines truncate by pixel width, and the range is convention
+    # rather than a published limit.
     return RuleFinding(
         "SEO_META_003", "Metadata", Severity.LOW,
         "Title length outside recommended range",
         f"Titles shorter than {min_len} or longer than {max_len} characters tend to get truncated or under-describe the page in search results.",
         f"Aim for a title between {min_len} and {max_len} characters.",
-        score_impact=-0.25 * len(affected), affected=affected,
+        score_impact=-0.25 * len(affected), confidence=0.7, affected=affected,
     )
 
 
@@ -105,12 +107,13 @@ def description_length(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # Same convention-not-limit caveat as the title rule.
     return RuleFinding(
         "SEO_META_006", "Metadata", Severity.LOW,
         "Meta description length outside recommended range",
         f"Descriptions shorter than {min_len} or longer than {max_len} characters are often truncated or under-informative in search results.",
         f"Aim for a meta description between {min_len} and {max_len} characters.",
-        score_impact=-0.25 * len(affected), affected=affected,
+        score_impact=-0.25 * len(affected), confidence=0.7, affected=affected,
     )
 
 
@@ -169,12 +172,14 @@ def generic_page_title(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # A list of placeholder-ish titles; "Home" is occasionally the right title
+    # for a homepage.
     return RuleFinding(
         "SEO_META_010", "Metadata", Severity.MEDIUM,
         "Generic, non-descriptive title",
         "These pages use a placeholder-style title (e.g. \"Home\", \"Untitled\") that says nothing about the page's content.",
         "Replace the title with a specific, descriptive one for each page.",
-        score_impact=-1.5 * len(affected), affected=affected,
+        score_impact=-1.5 * len(affected), confidence=0.7, affected=affected,
     )
 
 
@@ -187,13 +192,14 @@ def title_all_caps(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # An acronym-heavy title is all caps without shouting.
     return RuleFinding(
         "SEO_META_019", "Metadata", Severity.LOW,
         "Title written in all caps",
         "These pages' titles are written entirely in capital letters, which reads as shouting to users and "
         "is sometimes treated as a spam signal.",
         "Use normal sentence or title case instead of all caps.",
-        score_impact=-0.25 * len(affected), affected=affected,
+        score_impact=-0.25 * len(affected), confidence=0.8, affected=affected,
     )
 
 
@@ -206,13 +212,14 @@ def excessive_title_punctuation(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # A run of "!!" is sometimes the brand's actual name.
     return RuleFinding(
         "SEO_META_020", "Metadata", Severity.LOW,
         "Excessive punctuation in title",
         "These titles contain runs of repeated ! or ? characters, which reads as spammy and can trigger "
         "search engines to rewrite the title in results.",
         "Use plain, single punctuation marks in titles.",
-        score_impact=-0.25 * len(affected), affected=affected,
+        score_impact=-0.25 * len(affected), confidence=0.7, affected=affected,
     )
 
 
@@ -225,13 +232,14 @@ def meta_description_all_caps(ctx: RuleContext) -> RuleFinding | None:
     ]
     if not affected:
         return None
+    # Same acronym caveat as the title rule.
     return RuleFinding(
         "SEO_META_022", "Metadata", Severity.LOW,
         "Meta description written in all caps",
         "These pages' meta descriptions are written entirely in capital letters, which reads as shouting "
         "and looks unpolished in search results.",
         "Use normal sentence case instead of all caps.",
-        score_impact=-0.25 * len(affected), affected=affected,
+        score_impact=-0.25 * len(affected), confidence=0.8, affected=affected,
     )
 
 

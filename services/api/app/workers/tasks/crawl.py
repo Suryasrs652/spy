@@ -135,7 +135,7 @@ async def _run_audit_async(audit_id: str) -> None:
                     audit_id=audit.id, rule_id=finding.rule_id, category=finding.category,
                     severity=finding.severity.value, title=finding.title, description=finding.description,
                     recommendation=finding.recommendation, affected_count=finding.affected_count,
-                    score_impact=finding.score_impact,
+                    score_impact=finding.score_impact, confidence=finding.confidence,
                 )
                 db.add(issue)
                 await db.flush()

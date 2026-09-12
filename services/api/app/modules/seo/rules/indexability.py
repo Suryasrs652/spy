@@ -255,11 +255,13 @@ def indexable_not_in_sitemap(ctx: RuleContext) -> RuleFinding | None:
     # a handful of pages is normal (new content, sitemap not yet refreshed).
     if not affected or len(affected) < max(3, len(indexable) * 0.3):
         return None
+    # Only as complete as sitemap discovery was, and index expansion is
+    # capped.
     return RuleFinding(
         "SEO_INDEX_008", "Indexability", Severity.MEDIUM,
         "Indexable pages missing from the sitemap",
         "A large share of this site's indexable pages weren't listed in the XML sitemap, making them harder "
         "for search engines to discover efficiently.",
         "Regenerate the sitemap to include all indexable pages.",
-        score_impact=-1 * len(affected), affected=affected,
+        score_impact=-1 * len(affected), confidence=0.8, affected=affected,
     )
