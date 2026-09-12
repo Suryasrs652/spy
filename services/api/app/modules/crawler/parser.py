@@ -59,9 +59,62 @@ _GENERIC_ALT_RE = re.compile(
 
 # §48 AEO "question coverage": a heading counts as question-style if it's
 # phrased as a natural-language question, not just any heading ending in "?".
+#
+# This is Latin-anchored on purpose for English — "How X works" is question-
+# shaped from its very first word. It is not a defect elsewhere so much as
+# an incomplete one: on a real four-language site, the Hindi translation of
+# an English "What makes X look cheap" article ("... सस्ता क्यों दिखता है",
+# literally "... look cheap why") carries its question word ("क्यों", why)
+# in the middle of the sentence, not the start, because Hindi/Tamil/Telugu
+# are SOV languages — the question particle sits before the verb, wherever
+# that falls. An anchored regex can never find it no matter which words are
+# in the list. That left every non-Latin page on the site reporting 0-4%
+# question coverage against the English pages' >90%, not because the site
+# writes fewer questions in translation but because the detector could not
+# see them: `question_heading_count` summed to 73 across 22 English pages
+# and 3 across each of 48 Hindi/Tamil/Telugu pages.
+#
+# So Indic scripts get their own check: does the heading contain a known
+# question particle anywhere, not just at the start. Gated by script — a
+# particle is only checked for in headings that actually contain characters
+# from its own Unicode block, so an unrelated Latin heading can't collide
+# with a short Devanagari/Tamil/Telugu string. This is a narrower net than
+# the English one (a fixed particle list, not full question-formation
+# grammar) and undercounts rather than guesses, matching how the rest of
+# this codebase treats non-Latin scripts (see app/core/text_width.py).
 _QUESTION_START_RE = re.compile(
     r"^(who|what|when|where|why|how|which|can|does|do|is|are|should|will)\b", re.I
 )
+
+_DEVANAGARI_RANGE = (0x0900, 0x097F)
+_TAMIL_RANGE = (0x0B80, 0x0BFF)
+_TELUGU_RANGE = (0x0C00, 0x0C7F)
+
+
+def _has_script(text: str, block: tuple[int, int]) -> bool:
+    lo, hi = block
+    return any(lo <= ord(ch) <= hi for ch in text)
+
+
+# Interrogative particles, not full question grammar — deliberately narrow
+# rather than a guess at every way each language can ask something.
+_INDIC_QUESTION_PARTICLES = {
+    _DEVANAGARI_RANGE: (
+        "क्या", "क्यों", "कैसे", "कैसा", "कैसी", "कब", "कहाँ", "कहां",
+        "कौन", "कितना", "कितनी", "कितने",
+    ),
+    _TAMIL_RANGE: ("என்ன", "எப்படி", "ஏன்", "எப்போது", "எங்கே", "யார்", "எது"),
+    _TELUGU_RANGE: ("ఏమిటి", "ఏమి", "ఎలా", "ఎందుకు", "ఎప్పుడు", "ఎక్కడ", "ఎవరు"),
+}
+
+
+def _is_question_heading(text: str) -> bool:
+    if text.endswith("?") or _QUESTION_START_RE.match(text):
+        return True
+    for block, particles in _INDIC_QUESTION_PARTICLES.items():
+        if _has_script(text, block) and any(p in text for p in particles):
+            return True
+    return False
 
 
 @dataclass
@@ -209,7 +262,7 @@ def _extract_headings(soup: BeautifulSoup, result: ParsedPage) -> None:
         text = (_clean_text(tag.get_text()) or "").strip()
         if not text:
             continue
-        if text.endswith("?") or _QUESTION_START_RE.match(text):
+        if _is_question_heading(text):
             result.question_heading_count += 1
 
     # A heading hierarchy is "valid" if it never jumps down more than one

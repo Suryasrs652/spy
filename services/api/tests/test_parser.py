@@ -25,6 +25,37 @@ def test_no_question_headings_when_none_present() -> None:
     assert result.question_heading_count == 0
 
 
+def test_hindi_question_heading_is_detected() -> None:
+    """The real defect this guards: a Hindi translation of an English
+    question-phrased heading carries its question particle ("क्यों", why)
+    mid-sentence, before the verb — Hindi is SOV, so the particle is never
+    at the start. A start-anchored English regex can never find it.
+    Verified against the live translation of
+    spilanthstudio.com/insights/what-makes-generated-footage-look-cheap.html.
+    """
+    result = _parse("<h1>जनरेटेड फ़ुटेज सस्ता क्यों दिखता है</h1>")
+    assert result.question_heading_count == 1
+
+
+def test_tamil_and_telugu_question_headings_are_detected() -> None:
+    result = _parse("<h2>இது எப்படி வேலை செய்கிறது</h2><h2>ఇది ఎలా పని చేస్తుంది</h2>")
+    assert result.question_heading_count == 2
+
+
+def test_a_devanagari_heading_with_no_question_particle_is_not_counted() -> None:
+    """The particle list is narrow on purpose — this must not turn into "any
+    Devanagari heading counts", or it stops meaning anything."""
+    result = _parse("<h2>व्यावसायिक विज्ञापन: त्वरित उत्तर</h2>")
+    assert result.question_heading_count == 0
+
+
+def test_a_latin_heading_is_unaffected_by_the_indic_particle_list() -> None:
+    """Script-gating exists so a coincidental substring match can't fire
+    outside the script it belongs to."""
+    result = _parse("<h2>Our Services</h2><h2>How AI video generation works</h2>")
+    assert result.question_heading_count == 1
+
+
 def test_list_and_table_and_definition_list_counts() -> None:
     result = _parse(
         "<ul><li>a</li></ul><ol><li>b</li></ol>"
