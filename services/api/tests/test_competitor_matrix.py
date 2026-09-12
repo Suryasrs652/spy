@@ -12,6 +12,7 @@ from app.modules.competitors.matrix import (
     MATERIAL_GAP,
     MAX_ADVANTAGES,
     SIGNALS,
+    SPREAD_TOLERANCE,
     build_profile,
     compare_all,
     find_advantages,
@@ -226,3 +227,30 @@ def test_findings_read_correctly_with_one_leader_and_with_several() -> None:
     assert shared, "expected the same signals to surface in both runs"
     for key in shared:
         assert by_key_solo[key] != by_key_duo[key]
+
+
+def test_a_midpoint_is_never_asserted_about_competitors_it_is_untrue_of() -> None:
+    """Two rivals at 77% and 17% have no shared figure. Reporting their
+    midpoint named both companies and attributed a number to them that
+    neither hit — a reader who checked would stop trusting the report, and
+    would be right to.
+    """
+    you = _profile("Your site", geo__source_attribution=5.7)
+    spread = [
+        _profile("Superside", id="c1", geo__source_attribution=77.0),
+        _profile("Vidsy", id="c2", geo__source_attribution=16.7),
+    ]
+    finding = find_advantages(you, spread)[0]["finding"]
+    assert "47%" not in finding
+    assert "17" in finding and "77" in finding
+
+
+def test_competitors_that_agree_still_get_a_single_figure() -> None:
+    """A range where there is no real spread is just noise."""
+    you = _profile("Your site", geo__source_attribution=5.0)
+    agreed = [
+        _profile("C1", id="c1", geo__source_attribution=70.0),
+        _profile("C2", id="c2", geo__source_attribution=70.0 + SPREAD_TOLERANCE),
+    ]
+    finding = find_advantages(you, agreed)[0]["finding"]
+    assert "–" not in finding, finding

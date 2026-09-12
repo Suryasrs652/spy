@@ -43,6 +43,13 @@ MATERIAL_GAP = 5.0
 # How many advantages to report. Past this the list stops being a plan.
 MAX_ADVANTAGES = 8
 
+# When two competitors are further apart than this, no single number is true
+# of both, so the finding reports their range instead of a midpoint. Without
+# it, Superside at 77% and Vidsy at 17% produced "Superside and Vidsy link out
+# to a source on 47% of pages" — a figure neither of them hits, asserted about
+# both by name.
+SPREAD_TOLERANCE = 10.0
+
 
 @dataclass(frozen=True)
 class SiteProfile:
@@ -198,7 +205,7 @@ SIGNALS: list[Signal] = [
     ),
     Signal(
         "geo.entity_recognition", "Entity strength",
-        "{leaders} declare{s} what their pages are about to {theirs}; yours reach {yours}.",
+        "{leaders} score{s} {theirs} on declaring what their pages are about; you score {yours}.",
         "Declare the organization on the homepage and the subject of each page — Service, Product "
         "or Person — rather than leaving the page type implicit.",
         leverage=1.2,
@@ -287,6 +294,19 @@ def _fmt(value: float) -> str:
     return f"{value:.0f}%"
 
 
+def _fmt_theirs(values: list[float]) -> str:
+    """One competitor's figure, or a range when several disagree.
+
+    The midpoint of two distant values describes neither of them. A reader who
+    acts on "both do 47%" and then looks at the two sites finds 77% and 17%,
+    and stops trusting the rest of the report — correctly.
+    """
+    low, high = min(values), max(values)
+    if high - low <= SPREAD_TOLERANCE:
+        return _fmt(median(values))
+    return f"{low:.0f}–{high:.0f}%"
+
+
 def _possessive(names: list[str]) -> str:
     """Superside -> Superside's; Superside and Vidsy -> Superside and Vidsy's.
     The apostrophe attaches to the last name either way."""
@@ -341,7 +361,7 @@ def find_advantages(you: SiteProfile, competitors: list[SiteProfile]) -> list[di
                 "competitors_ahead": len(ahead),
                 "gap": round(gap, 1),
                 "finding": signal.statement.format(
-                    leaders=_join(leaders), theirs=_fmt(typical), yours=_fmt(your_value),
+                    leaders=_join(leaders), theirs=_fmt_theirs(their_values), yours=_fmt(your_value),
                     s="s" if len(leaders) == 1 else "",
                     possessive=_possessive(leaders),
                 ),
