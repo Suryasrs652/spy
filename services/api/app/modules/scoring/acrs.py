@@ -25,6 +25,8 @@ unmeasured rather than estimated.
 """
 from __future__ import annotations
 
+from urllib.parse import urlparse
+
 from app.core.schema_org import ORGANIZATION_TYPES
 from app.modules.crawler.models import CrawlPage, PageLink
 
@@ -63,6 +65,27 @@ def _pct(matching: int, total: int) -> float:
     return 100.0 * matching / total if total else 0.0
 
 
+# A click-to-chat or booking-widget link is how a visitor reaches the
+# business, not a source the page is citing — the same reason `mailto:`/
+# `tel:` hrefs never become PageLink rows at all (app/modules/crawler/
+# parser.py). These arrive as ordinary https:// links, though, and a contact
+# page carrying one is nowhere near the boilerplate-frequency filter below
+# (it appears on a handful of pages, not most of the site), so an explicit,
+# domain-based exclusion is the only thing that catches it. Found on a real
+# audit: a WhatsApp badge on four contact pages was the only "citation"
+# behind a nonzero source_attribution score, on a site that otherwise
+# cites nothing.
+_CONTACT_MECHANISM_DOMAINS = frozenset({
+    "wa.me", "api.whatsapp.com", "chat.whatsapp.com",
+    "calendly.com", "cal.com", "m.me",
+})
+
+
+def _is_contact_mechanism(url: str) -> bool:
+    host = (urlparse(url).netloc or "").lower().removeprefix("www.")
+    return host in _CONTACT_MECHANISM_DOMAINS
+
+
 def _pages_citing_a_source(indexable: list[CrawlPage], links: list[PageLink] | None) -> set:
     """Page ids that link out to something other than sitewide chrome."""
     if not links:
@@ -70,7 +93,10 @@ def _pages_citing_a_source(indexable: list[CrawlPage], links: list[PageLink] | N
 
     page_ids = {p.id for p in indexable}
     external = [
-        link for link in links if not link.is_internal and link.source_page_id in page_ids
+        link for link in links
+        if not link.is_internal
+        and link.source_page_id in page_ids
+        and not _is_contact_mechanism(link.target_url)
     ]
 
     if len(page_ids) < MIN_PAGES_FOR_BOILERPLATE_DETECTION:

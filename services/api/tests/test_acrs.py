@@ -157,3 +157,41 @@ def test_sitewide_footer_links_do_not_count_as_citations() -> None:
     )
     _, evidence = compute_acrs(pages, footer)
     assert evidence["source_attribution"] == 10.0
+
+
+def test_a_whatsapp_contact_link_does_not_count_as_a_citation() -> None:
+    """Found on a real audit: a WhatsApp click-to-chat badge on four contact
+    pages was the only external link on the entire site, and it inflated
+    source_attribution from a true 0% to a false 5.7%. It's how a visitor
+    reaches the business, not a source the page cites — same category as
+    the mailto:/tel: links that never become PageLink rows at all."""
+    from app.modules.crawler.models import PageLink
+
+    pages = [_citable(url=f"https://example.com/{i}") for i in range(10)]
+    audit_id = uuid.uuid4()
+    contact_page = pages[0]
+    whatsapp = PageLink(
+        id=uuid.uuid4(), audit_id=audit_id, source_page_id=contact_page.id,
+        target_url="https://wa.me/919999999999", is_internal=False,
+    )
+    _, evidence = compute_acrs(pages, [whatsapp])
+    assert evidence["source_attribution"] == 0.0
+
+
+def test_a_real_citation_still_counts_alongside_an_excluded_contact_link() -> None:
+    from app.modules.crawler.models import PageLink
+
+    page = _citable()
+    audit_id = uuid.uuid4()
+    links = [
+        PageLink(
+            id=uuid.uuid4(), audit_id=audit_id, source_page_id=page.id,
+            target_url="https://wa.me/919999999999", is_internal=False,
+        ),
+        PageLink(
+            id=uuid.uuid4(), audit_id=audit_id, source_page_id=page.id,
+            target_url="https://research.example.org/study", is_internal=False,
+        ),
+    ]
+    _, evidence = compute_acrs([page], links)
+    assert evidence["source_attribution"] == 100.0
