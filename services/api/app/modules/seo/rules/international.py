@@ -27,7 +27,16 @@ def hreflang_missing_self_reference(ctx: RuleContext) -> RuleFinding | None:
         if not p.hreflang_tags:
             continue
         urls = {t.get("url") for t in p.hreflang_tags}
-        if p.normalized_url not in urls:
+        # A canonicalized duplicate is not "a page" as far as indexing is
+        # concerned — Google consolidates it into its canonical and evaluates
+        # that URL's own signals, not this one's. So an hreflang block that
+        # references the canonical instead of the literal fetched URL is a
+        # self-reference in every sense that matters, not a missing one.
+        # Without this, a site whose homepage is reachable at both "/" and
+        # "/index.html" (a relative nav link, not a mistake) gets flagged
+        # for hreflang on the URL nobody was ever supposed to treat as
+        # separate from "/" in the first place.
+        if p.normalized_url not in urls and (not p.canonical_url or p.canonical_url not in urls):
             affected.append((p.id, {"url": p.url}))
     if not affected:
         return None
@@ -97,12 +106,20 @@ def hreflang_return_tag_missing(ctx: RuleContext) -> RuleFinding | None:
     by_normalized = ctx.by_normalized_url()
     affected = []
     for p in ctx.crawled():
+        # What an alternate is expected to point back to: this page's own
+        # URL, or its canonical if it has one — same reasoning as the
+        # self-reference rule above. A canonicalized duplicate's alternates
+        # reciprocate to the canonical, not to the duplicate's own URL, and
+        # that is the correct, not the broken, shape.
+        acceptable_returns = {p.normalized_url}
+        if p.canonical_url:
+            acceptable_returns.add(p.canonical_url)
         for tag in p.hreflang_tags:
             target = by_normalized.get(tag.get("url"))
             if target is None or target.id == p.id:
                 continue
             target_urls = {t.get("url") for t in (target.hreflang_tags or [])}
-            if p.normalized_url not in target_urls:
+            if not (acceptable_returns & target_urls):
                 affected.append((p.id, {"url": p.url, "points_to": tag["url"]}))
                 break
     if not affected:
