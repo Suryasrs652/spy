@@ -13,6 +13,7 @@ from app.modules.competitors import service
 from app.modules.competitors.schemas import (
     CompetitorComparisonOut,
     CompetitorCreate,
+    CompetitorMatrixOut,
     CompetitorOut,
     ContentGapOut,
 )
@@ -75,6 +76,21 @@ async def refresh_competitor(
 
     refresh_competitor_task.delay(str(competitor_id))
     return {"queued": True}
+
+
+@router.get("/{project_id}/competitors/matrix", response_model=CompetitorMatrixOut)
+async def competitor_matrix(
+    project_id: uuid.UUID,
+    ctx: AuthContext = Depends(require_role(*ROLE_CAN_VIEW)),
+    db: AsyncSession = Depends(get_db),
+) -> CompetitorMatrixOut:
+    """Your latest audit against every benchmarked competitor at once, plus
+    the specific signals where they are ahead.
+    """
+    matrix = await service.get_competitor_matrix(
+        db, organization_id=ctx.organization_id, project_id=project_id
+    )
+    return CompetitorMatrixOut.model_validate(matrix)
 
 
 @router.get("/{project_id}/competitors/{competitor_id}/compare", response_model=CompetitorComparisonOut)

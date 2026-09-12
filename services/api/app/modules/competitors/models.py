@@ -54,9 +54,17 @@ class Competitor(UUIDPKMixin, TimestampMixin, Base):
     seo_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     aeo_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     geo_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    acrs_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     technical_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     onpage_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     content_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    internal_links_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    structured_data_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     performance_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+
+    # Which scoring methodology produced the numbers above. A benchmark run
+    # under an older version is not comparable to a current audit, and the
+    # matrix excludes it rather than mixing two meanings of one field (§22).
+    score_version: Mapped[str | None] = mapped_column(String(30))
 
     evidence: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)

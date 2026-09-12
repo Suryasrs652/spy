@@ -289,6 +289,44 @@ export interface RankHistory {
   history: RankHistoryPoint[];
 }
 
+export interface MatrixFactor {
+  key: string;
+  label: string;
+  your_score: number | null;
+  /** Keyed by competitor id. `null` means that site has no number for this
+   *  factor — not that it scored zero. */
+  competitor_scores: Record<string, number | null>;
+  best_competitor_id: string | null;
+  gap_to_best: number | null;
+}
+
+/** One signal where competitors measurably lead. `finding` states a measured
+ *  difference and never a cause — Spy has no ranking data for a rival site. */
+export interface Advantage {
+  key: string;
+  label: string;
+  your_value: number;
+  competitor_values: Record<string, number>;
+  leaders: string[];
+  competitors_ahead: number;
+  gap: number;
+  finding: string;
+  what_to_do: string;
+}
+
+export interface CompetitorMatrix {
+  has_data: boolean;
+  reason: string | null;
+  your_latest_audit_id: string | null;
+  your_score_version: string | null;
+  competitors: Competitor[];
+  factors: MatrixFactor[];
+  advantages: Advantage[];
+  size: { your_pages: number; competitor_pages: Record<string, number>; finding: string; what_to_do: string } | null;
+  not_comparable: { competitor_id: string; name: string; reason: string }[];
+  methodology: string | null;
+}
+
 export interface Competitor {
   id: string;
   name: string;
@@ -300,10 +338,14 @@ export interface Competitor {
   seo_score: number | null;
   aeo_score: number | null;
   geo_score: number | null;
+  acrs_score: number | null;
   technical_score: number | null;
   onpage_score: number | null;
   content_score: number | null;
+  internal_links_score: number | null;
+  structured_data_score: number | null;
   performance_score: number | null;
+  score_version: string | null;
   created_at: string;
 }
 

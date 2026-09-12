@@ -15,6 +15,7 @@ from app.db.base import utcnow
 from app.modules.audits.models import Audit, AuditStatus
 from app.modules.backlinks.service import record_discovered_backlinks
 from app.modules.competitors.content_gap import compute_gap_terms, extract_top_terms
+from app.modules.competitors.matrix import build_profile, compare_all
 from app.modules.competitors.models import Competitor, CompetitorStatus
 from app.modules.crawler.engine import CrawlFailure, crawl_site
 from app.modules.crawler.normalize import canonical_origin
@@ -88,6 +89,14 @@ async def remove_competitor(
 
 # The matrix the report shows, headline scores first so a reader sees where
 # the gap is before seeing what it is made of.
+# The stored columns a profile is built from. Evidence sub-components are
+# picked up separately by build_profile.
+_MATRIX_SCORE_FIELDS = (
+    "spy_score", "seo_score", "aeo_score", "geo_score", "acrs_score",
+    "technical_score", "onpage_score", "content_score",
+    "internal_links_score", "structured_data_score", "performance_score",
+)
+
 _COMPARISON_FIELDS = (
     "spy_score", "seo_score", "aeo_score", "geo_score",
     "technical_score", "onpage_score", "content_score", "performance_score",
@@ -186,6 +195,89 @@ async def get_content_gap_analysis(
     }
 
 
+async def get_competitor_matrix(
+    db: AsyncSession, *, organization_id: uuid.UUID, project_id: uuid.UUID
+) -> dict:
+    """Your latest completed audit against every benchmarked competitor.
+
+    The comparison itself lives in `matrix.py` as pure functions over two
+    plain profiles, so it can be reasoned about and tested without a database
+    or a crawl. This function's whole job is turning rows into those profiles.
+    """
+    latest_audit = (
+        await db.execute(
+            select(Audit)
+            .where(
+                Audit.organization_id == organization_id, Audit.project_id == project_id,
+                Audit.status == AuditStatus.COMPLETED.value,
+            )
+            .order_by(Audit.created_at.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+    competitors = await list_competitors(db, organization_id=organization_id, project_id=project_id)
+    benchmarked = [c for c in competitors if c.status == CompetitorStatus.COMPLETED.value]
+
+    if latest_audit is None:
+        return {
+            "has_data": False,
+            "reason": "No completed audit of your own site yet. Run one to compare against competitors.",
+            "your_latest_audit_id": None, "competitors": competitors,
+            "factors": [], "advantages": [], "size": None, "not_comparable": [],
+        }
+    if not benchmarked:
+        return {
+            "has_data": False,
+            "reason": (
+                "No competitor has finished benchmarking yet. Add one and refresh it to build the matrix."
+                if not competitors
+                else "Competitors are added but none has a completed benchmark yet."
+            ),
+            "your_latest_audit_id": latest_audit.id, "competitors": competitors,
+            "factors": [], "advantages": [], "size": None, "not_comparable": [],
+        }
+
+    evidence = latest_audit.evidence or {}
+    you = build_profile(
+        id=None, name="Your site", score_version=latest_audit.score_version,
+        scores={f: getattr(latest_audit, f) for f in _MATRIX_SCORE_FIELDS},
+        evidence=evidence,
+        pages_scored=evidence.get("total_pages_scored"),
+        # An audit that stopped at its own ceiling has not seen the whole
+        # site, so its page count is a floor rather than a measurement.
+        crawl_hit_its_limit=(evidence.get("urls_processed") or 0) >= (latest_audit.max_urls or 0),
+    )
+    rivals = [
+        build_profile(
+            id=str(c.id), name=c.name, score_version=c.score_version,
+            scores={f: getattr(c, f, None) for f in _MATRIX_SCORE_FIELDS},
+            evidence=c.evidence or {},
+            pages_scored=(c.evidence or {}).get("total_pages_scored"),
+            crawl_hit_its_limit=bool((c.evidence or {}).get("crawl_hit_its_limit")),
+        )
+        for c in benchmarked
+    ]
+
+    result = compare_all(you, rivals)
+    return {
+        "has_data": True, "reason": None,
+        "your_latest_audit_id": latest_audit.id,
+        "your_score_version": latest_audit.score_version,
+        "competitors": benchmarked,
+        "factors": result.factors,
+        "advantages": result.advantages,
+        "size": result.size,
+        "not_comparable": result.not_comparable,
+        "methodology": (
+            "Every site here was crawled and scored by the same deterministic engine. These are "
+            "measured differences in on-page evidence, not an explanation of anyone's search "
+            f"position — Spy has no ranking data for a competitor's site. Competitor crawls stop at "
+            f"{MAX_COMPETITOR_URLS} pages, so they are a shallower sample than a full audit."
+        ),
+    }
+
+
 async def run_competitor_benchmark(db: AsyncSession, *, competitor_id: uuid.UUID) -> None:
     """The actual crawl+score — called from the Celery task
     (app/workers/tasks/competitors.py), mirroring _run_audit_async's shape
@@ -232,11 +324,24 @@ async def run_competitor_benchmark(db: AsyncSession, *, competitor_id: uuid.UUID
         competitor.seo_score = score.seo_score
         competitor.aeo_score = score.aeo_score
         competitor.geo_score = score.geo_score
+        competitor.acrs_score = score.acrs_score
         competitor.technical_score = score.technical_score
         competitor.onpage_score = score.onpage_score
         competitor.content_score = score.content_score
+        competitor.internal_links_score = score.internal_links_score
+        competitor.structured_data_score = score.structured_data_score
         competitor.performance_score = score.performance_score
-        competitor.evidence = {**score.evidence, "top_terms": top_terms}
+        competitor.score_version = score.score_version
+        competitor.evidence = {
+            **score.evidence,
+            "top_terms": top_terms,
+            # Whether this benchmark stopped because it ran out of site or
+            # because it hit its own ceiling. The matrix refuses to compare
+            # page counts across two different ceilings, since the difference
+            # would be a fact about the crawl settings, not the sites.
+            "crawl_hit_its_limit": result.max_urls_reached,
+            "crawl_limit": MAX_COMPETITOR_URLS,
+        }
         await db.commit()
         logger.info("competitor_benchmark_completed", competitor_id=str(competitor_id), spy_score=score.spy_score)
     except CrawlFailure as exc:

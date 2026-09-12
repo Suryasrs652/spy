@@ -4,7 +4,8 @@ import { useEffect, useState } from "react";
 import { use as usePromise } from "react";
 import Link from "next/link";
 import { apiDelete, apiGet, apiPost, ApiError } from "@/lib/api";
-import type { Competitor, CompetitorComparison, ContentGap } from "@/lib/api";
+import type { Competitor, CompetitorComparison, CompetitorMatrix as Matrix, ContentGap } from "@/lib/api";
+import { CompetitorMatrix } from "@/components/CompetitorMatrix";
 
 const SCORE_LABELS: Record<string, string> = {
   spy_score: "Overall", seo_score: "SEO", aeo_score: "AEO", geo_score: "GEO",
@@ -22,10 +23,16 @@ export default function CompetitorsPage({ params }: { params: Promise<{ id: stri
   const [expanded, setExpanded] = useState<string | null>(null);
   const [comparison, setComparison] = useState<CompetitorComparison | null>(null);
   const [gap, setGap] = useState<ContentGap | null>(null);
+  const [matrix, setMatrix] = useState<Matrix | null>(null);
 
   async function load() {
     try {
-      setCompetitors(await apiGet<Competitor[]>(`projects/${id}/competitors`));
+      const [list, built] = await Promise.all([
+        apiGet<Competitor[]>(`projects/${id}/competitors`),
+        apiGet<Matrix>(`projects/${id}/competitors/matrix`).catch(() => null),
+      ]);
+      setCompetitors(list);
+      setMatrix(built);
     } catch {
       setCompetitors([]);
     }
@@ -105,11 +112,19 @@ export default function CompetitorsPage({ params }: { params: Promise<{ id: stri
         {error && <p className="text-sm text-red-400">{error}</p>}
       </div>
 
+      {matrix && (
+        <div className="mb-10">
+          <CompetitorMatrix matrix={matrix} />
+        </div>
+      )}
+
       {!competitors ? (
         <div className="card p-6 text-muted text-sm">Loading…</div>
       ) : competitors.length === 0 ? (
         <div className="card p-8 text-center text-muted">No competitors added yet.</div>
       ) : (
+        <>
+        <h2 className="text-lg font-semibold mb-3">Each competitor</h2>
         <div className="space-y-3">
           {competitors.map((c) => (
             <div key={c.id} className="card p-4">
@@ -175,6 +190,7 @@ export default function CompetitorsPage({ params }: { params: Promise<{ id: stri
             </div>
           ))}
         </div>
+        </>
       )}
     </div>
   );
