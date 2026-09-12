@@ -95,6 +95,12 @@ class CrawlPage(UUIDPKMixin, Base):
     has_definition_list: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     has_author_byline: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
 
+    # §ACRS — AI Citation Readiness inputs (see app/modules/scoring/acrs.py).
+    statistic_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    has_publication_date: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    paragraph_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    self_contained_paragraph_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+
     # §144/M5 — internal PageRank (app/modules/scoring/pagerank.py),
     # normalized 0-100 with the top-ranked page (usually the homepage) at
     # 100. Computed post-crawl once the full link graph is known, so it's

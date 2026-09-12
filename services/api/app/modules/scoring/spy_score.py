@@ -26,6 +26,7 @@ from dataclasses import dataclass, field
 
 from app.core.schema_org import ORGANIZATION_TYPES
 from app.modules.crawler.models import CrawlPage, PageLink
+from app.modules.scoring.acrs import compute_acrs
 from app.modules.seo.rules import RuleFinding
 
 CURRENT_SCORE_VERSION = "spy-score-v1.0"
@@ -61,6 +62,7 @@ class ScoreBreakdown:
     authority_score: float | None
     aeo_score: float
     geo_score: float
+    acrs_score: float
     confidence: float
     score_version: str = CURRENT_SCORE_VERSION
     evidence: dict = field(default_factory=dict)
@@ -333,6 +335,10 @@ def compute_spy_score(
     )
     aeo, aeo_evidence = _aeo_score(pages)
     geo, geo_evidence = _geo_score(pages, links)
+    # ACRS is reported alongside the composite rather than inside it: it
+    # asks a different question (would a generative system quote this?) and
+    # folding it in would change what spy_score has always meant.
+    acrs, acrs_evidence = compute_acrs(pages, links)
 
     # "architecture" (internal linking/orphans/depth, §21's "Internal
     # architecture" weight) contributes to the composite but has no
@@ -358,6 +364,7 @@ def compute_spy_score(
         authority_score=authority,
         aeo_score=aeo,
         geo_score=geo,
+        acrs_score=acrs,
         confidence=confidence,
         evidence={
             "weights_used": weights,
@@ -365,6 +372,7 @@ def compute_spy_score(
             "authority": authority_evidence,
             "aeo": aeo_evidence,
             "geo": geo_evidence,
+            "acrs": acrs_evidence,
             "total_pages_scored": total_pages,
             "urls_processed": urls_processed,
         },

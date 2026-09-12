@@ -157,6 +157,7 @@ async def _run_audit_async(audit_id: str) -> None:
             audit.authority_score = score.authority_score
             audit.aeo_score = score.aeo_score
             audit.geo_score = score.geo_score
+            audit.acrs_score = score.acrs_score
             audit.confidence = score.confidence
             audit.evidence = score.evidence
             await db.commit()

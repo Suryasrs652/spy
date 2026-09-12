@@ -41,6 +41,13 @@ asked to guess; identical input produces identical output.
 weights actually used, and a confidence value derived from crawl coverage. The
 evidence is kept so any score can be re-derived and argued with.
 
+**Scores AI citation readiness (ACRS)** — whether a generative system could
+quote a page as an answer and attribute it: checkable figures, a visible date,
+named sources, a byline, and prose that survives being lifted out of context.
+It deliberately does not score whether a claim is *true* or whether the
+information exists elsewhere — both need a corpus and a judgement, and are
+reported as unmeasured rather than estimated.
+
 **Scores AEO and GEO**, not just SEO:
 
 - *AEO* — how extractable the content is for answer engines: schema coverage,
@@ -116,7 +123,7 @@ auth, **don't expose this to the internet as-is.**
 The repo ships agents and skills in `.claude/`, so an audit can be run and
 interpreted conversationally rather than by hand.
 
-Analysis runs as a pipeline. Eleven specialists each look at one dimension,
+Analysis runs as a pipeline. Twelve specialists each look at one dimension,
 a validator checks every finding against the live site, a resolver settles
 disagreements between them, and only then is anything scored, sequenced and
 written up.
@@ -129,6 +136,7 @@ written up.
                         ├── entity-analyst ─────────┤
   URL ──► Crawl Engine ─┼── aeo-analyst ────────────┤
                         ├── geo-analyst ────────────┤
+                        ├── citation-analyst ───────┤
                         ├── internal-link-analyst ──┤
                         ├── performance-analyst ────┤
                         ├── competitor-analyst ─────┤
@@ -150,7 +158,7 @@ written up.
                                report-agent
 ```
 
-The eleven analysts are independent and should be run in parallel. Everything
+The twelve analysts are independent and should be run in parallel. Everything
 after them is strictly sequential, and the order is the point: nothing reaches
 a human that hasn't been verified against the live site, and nothing is
 sequenced before the analysts' disagreements are settled.
@@ -170,6 +178,7 @@ give a different answer each run and quietly break re-auditing.
 | `schema-analyst` | Which JSON-LD types are deployed, where, and what's missing |
 | `entity-analyst` | Who the site says it is — identity, consistency, `sameAs`, authorship |
 | `aeo-analyst` | Extractability for answer engines: questions, structure, bylines |
+| `citation-analyst` | AI Citation Readiness (ACRS) — is the content quotable and attributable |
 | `geo-analyst` | Entity definition for generative engines |
 | `internal-link-analyst` | PageRank distribution, unlinked pages, dead ends |
 | `performance-analyst` | Server response, weight, layout-shift risk — and what isn't measured |

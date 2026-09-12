@@ -26,6 +26,7 @@ class AuditOut(BaseModel):
     authority_score: float | None = None
     aeo_score: float | None = None
     geo_score: float | None = None
+    acrs_score: float | None = None
     confidence: float | None = None
     score_version: str
     evidence: dict = {}

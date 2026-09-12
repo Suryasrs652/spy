@@ -354,6 +354,10 @@ async def _fetch_and_parse(fetcher, url, depth, origin, policy, user_agent):
     page.table_count = parsed.table_count
     page.has_definition_list = parsed.has_definition_list
     page.has_author_byline = parsed.has_author_byline
+    page.statistic_count = parsed.statistic_count
+    page.has_publication_date = parsed.has_publication_date
+    page.paragraph_count = parsed.paragraph_count
+    page.self_contained_paragraph_count = parsed.self_contained_paragraph_count
 
     robots_meta_lower = (parsed.robots_meta or "").lower()
     x_robots_lower = (page.x_robots_tag or "").lower()

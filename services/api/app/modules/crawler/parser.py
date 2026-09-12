@@ -17,6 +17,38 @@ from app.modules.crawler.normalize import normalize_url
 
 _WHITESPACE_RE = re.compile(r"\s+")
 
+# §ACRS. Figures that read as a checkable claim rather than incidental
+# digits — a percentage, a sum of money, a multiplier, or a quantity with a
+# unit. A bare "2024" or a street number is not evidence of anything, so
+# neither counts.
+_STATISTIC_RE = re.compile(
+    r"(?<![\w.])(?:"
+    r"\d{1,3}(?:,\d{3})*(?:\.\d+)?\s?%"
+    r"|[$£€₹]\s?\d[\d,]*(?:\.\d+)?"
+    r"|\d[\d,]*(?:\.\d+)?\s?[x×]\b"
+    r"|\d[\d,]*(?:\.\d+)?\s?(?:k|m|bn|billion|million|thousand|users|customers|"
+    r"clients|projects|brands|hours|minutes|seconds|days|weeks|months|years|"
+    r"ms|kg|km|mb|gb|tb)\b"
+    r")",
+    re.I,
+)
+
+_SENTENCE_SPLIT_RE = re.compile(r"(?<=[.!?])\s+")
+
+# A paragraph opening with a back-reference cannot be quoted on its own —
+# the thing it refers to is in the paragraph above.
+_DEPENDENT_OPENER_RE = re.compile(
+    r"\s*(this|that|these|those|it|its|they|them|their|he|she|his|her|"
+    r"however|therefore|thus|also|additionally|moreover|furthermore|"
+    r"but|and|so|then|instead|otherwise|meanwhile|besides|finally|"
+    r"here|there)\b",
+    re.I,
+)
+
+# Below this a paragraph is a caption or a label, not a passage.
+_MIN_PASSAGE_WORDS = 8
+_MAX_PASSAGE_SENTENCES = 3
+
 # Alt text that carries no real information — usually the filename or a
 # CMS/theme default left in place, not a description of the image (§23
 # Images: "non-descriptive alt text").
@@ -88,6 +120,14 @@ class ParsedPage:
     has_definition_list: bool = False
     has_author_byline: bool = False
 
+    # §ACRS — AI Citation Readiness. What makes a passage safe for a
+    # generative system to lift and attribute: verifiable figures, a date,
+    # and paragraphs that stand up on their own out of context.
+    statistic_count: int = 0
+    has_publication_date: bool = False
+    paragraph_count: int = 0
+    self_contained_paragraph_count: int = 0
+
 
 def _clean_text(text: str | None) -> str | None:
     if text is None:
@@ -149,6 +189,7 @@ def parse_html(*, page_url: str, html: str, base_origin: str) -> ParsedPage:
     result.table_count = len(soup.find_all("table"))
     result.has_definition_list = any(dl.find("dt") and dl.find("dd") for dl in soup.find_all("dl"))
     result.has_author_byline = _has_author_byline(soup)
+    _extract_citation_signals(soup, result)
 
     return result
 
@@ -291,6 +332,42 @@ def _has_insecure_form_action(soup: BeautifulSoup, page_url: str) -> bool:
 
 
 _BYLINE_HINT_RE = re.compile(r"\b(author|byline)\b", re.I)
+
+
+def _extract_citation_signals(soup: BeautifulSoup, result: ParsedPage) -> None:
+    """§ACRS inputs — all structural or pattern-based, never judged.
+
+    A generative system reusing a passage as an answer needs the passage to
+    survive being lifted out of the page: a figure it can check, a date so
+    it knows the claim isn't stale, and prose that still parses when the
+    surrounding paragraphs are gone. Those three are detectable; whether a
+    claim is *true* is not, and this deliberately does not pretend to score
+    it.
+    """
+    result.statistic_count = len(_STATISTIC_RE.findall(soup.get_text(" ")))
+
+    result.has_publication_date = bool(
+        soup.find("time", attrs={"datetime": True})
+        or soup.find("meta", attrs={"property": re.compile("article:(published|modified)_time", re.I)})
+        or any(
+            block.get(field)
+            for block in result.schema_blocks
+            for field in ("datePublished", "dateModified")
+        )
+    )
+
+    for paragraph in soup.find_all("p"):
+        text = _WHITESPACE_RE.sub(" ", paragraph.get_text(" ")).strip()
+        if len(text.split()) < _MIN_PASSAGE_WORDS:
+            continue
+        result.paragraph_count += 1
+        sentences = [s for s in _SENTENCE_SPLIT_RE.split(text) if s.strip()]
+        # One to three sentences is the shape a snippet or an AI answer
+        # quotes. Longer needs trimming; an opener that points at something
+        # earlier ("This means...", "However...") is unusable alone whatever
+        # its length.
+        if len(sentences) <= _MAX_PASSAGE_SENTENCES and not _DEPENDENT_OPENER_RE.match(text):
+            result.self_contained_paragraph_count += 1
 
 
 def _has_author_byline(soup: BeautifulSoup) -> bool:

@@ -88,6 +88,7 @@ class Audit(UUIDPKMixin, TimestampMixin, Base):
     authority_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     aeo_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     geo_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
+    acrs_score: Mapped[float | None] = mapped_column(Numeric(5, 2))
     confidence: Mapped[float | None] = mapped_column(Numeric(5, 2))
 
     # §21: "Scores must include: score, confidence, evidence, affected_pages,
